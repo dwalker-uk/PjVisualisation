@@ -343,24 +343,38 @@
 
     <!--
         ============================================================
-        SheetJS (xlsx.full.min.js) - inlined here for fully-offline
-        operation.
+        SheetJS (xlsx.full.min.js).
 
-        To make this file truly self-contained, paste the contents of
+        For now we load it from the official SheetJS CDN. This keeps
+        the HTML file small and avoids checking in a ~900KB minified
+        blob while the visualiser is still being shaped.
+
+        When you're ready to make the file fully self-contained
+        (e.g. for an offline target environment), paste the contents
+        of
             https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
-        between the BEGIN / END markers below, replacing the empty
-        placeholder.
+        between the BEGIN / END markers in the inline placeholder
+        block below, and optionally remove the CDN <script> tag.
 
-        If the placeholder is left empty, the page will detect this
-        on load and offer a one-time "load xlsx.full.min.js" upload
-        so you can still test the toolchain without editing the
-        HTML by hand.
+        Load order:
+          1. CDN script - defines window.XLSX if the network is
+             reachable.
+          2. Inline placeholder - empty for now; once populated it
+             takes over (or co-exists harmlessly).
+          3. The app script checks for window.XLSX and, if neither
+             source produced it, shows a one-time "load
+             xlsx.full.min.js from disk" bootstrap card so the rest
+             of the page can still be tested.
         ============================================================
     -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
     <script id="sheetjs-inline">
         /* ===== BEGIN SheetJS (xlsx.full.min.js) ===================== */
 
-        /* (Paste minified library contents here.) */
+        /* (Paste minified library contents here to make this HTML
+           file fully self-contained. Leave empty to use the CDN
+           <script> tag above.) */
 
         /* ===== END   SheetJS ======================================== */
     </script>
@@ -373,7 +387,8 @@
 
     <!--
         ============================================================
-        Bootstrap card - only shown if XLSX is not yet inlined.
+        Bootstrap card - only shown if neither the CDN script nor
+        the inline placeholder produced window.XLSX.
         ============================================================
     -->
     <div id="bootstrap-card" class="card" hidden>
@@ -381,10 +396,11 @@
         <h1>One-time setup</h1>
 
         <p>
-            SheetJS (the Excel parser) isn't inlined into this file yet.
-            Load it once from disk to continue, or paste the minified
-            library into the <code>&lt;script id="sheetjs-inline"&gt;</code>
-            block at the top of this HTML for a permanent, fully
+            SheetJS (the Excel parser) didn't load from the CDN and
+            hasn't been inlined into this file yet. Load it once from
+            disk to continue, or paste the minified library into the
+            <code>&lt;script id="sheetjs-inline"&gt;</code> block at
+            the top of this HTML for a permanent, fully
             self-contained file.
         </p>
 
