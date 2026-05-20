@@ -383,10 +383,15 @@
 
         /* Benefit children (b-level) plotted in the parent's row */
 
+        /*
+         * Benefit diamonds sit on top of the parent's gantt bar, so a
+         * light outline keeps them visible even when fill colour
+         * matches the underlying bar.
+         */
         .benefit-marker {
             cursor: pointer;
-            stroke: transparent;
-            stroke-width: 0;
+            stroke: rgba(255, 255, 255, 0.9);
+            stroke-width: 1.25;
             transition:
                 filter 140ms ease,
                 stroke 140ms ease,
@@ -396,7 +401,7 @@
         .benefit-marker:hover {
             filter: brightness(1.18) url(#hover-glow);
             stroke: #ffffff;
-            stroke-width: 1.5;
+            stroke-width: 2;
         }
 
         .benefit-label {
@@ -783,11 +788,12 @@
             fontSize:   { 1: 17, 2: 14, 3: 11 },
 
             // Extra vertical space appended to a row when it has any
-            // visible benefit-children to render. Sized for a small
-            // diamond plus a wrapped 1-2 line label below.
-            benefitZoneHeight: { 1: 36, 2: 32, 3: 28 },
-            benefitDiamondSize: { 1: 11, 2: 9, 3: 8 },
-            benefitFontSize:    { 1: 11, 2: 10, 3: 9 },
+            // visible benefit-children. The benefit diamonds themselves
+            // sit on top of the parent's gantt bar, so this zone only
+            // needs to fit the wrapped 2-line caption beneath the bar.
+            benefitZoneHeight:  { 1: 28, 2: 26, 3: 22 },
+            benefitDiamondSize: { 1: 8,  2: 6,  3: 5  },
+            benefitFontSize:    { 1: 11, 2: 10, 3: 9  },
 
             // Auto-fit floor: the chart will not scale rows below this
             // fraction of their natural height even if content exceeds
@@ -1739,15 +1745,21 @@
 
 
                 // Benefit children (b-level rows) plotted in this row.
+                // Diamonds are drawn on top of the parent's gantt bar
+                // (same vertical centre); only the caption text lives
+                // in the benefit zone below the bar.
                 if (benefits.length > 0) {
+
+                    const barH     = sized.barHeight[it.level];
+                    const barCy    = (barZone - barH) / 2 + barH / 2;   // == barZone / 2
 
                     const benZoneY = barZone;
                     const benH     = sized.benefitZoneHeight[it.level];
                     const diaSize  = sized.benefitDiamondSize[it.level];
                     const benFs    = sized.benefitFontSize[it.level];
-                    const diaCy    = benZoneY + diaSize / 2 + 3;
-                    const lblY     = diaCy + diaSize / 2 + 2;
-                    const lblH     = Math.max(8, benH - (lblY - benZoneY) - 2);
+
+                    const lblY     = benZoneY + 2;
+                    const lblH     = Math.max(8, benH - 4);
                     const lblW     = Math.max(monthWidth * 1.4, 70);
 
                     for (const b of benefits) {
@@ -1760,10 +1772,10 @@
                             class: 'benefit-marker',
                             'data-id':     b.id,
                             'data-colour': colourKey(b),
-                            points: `${cx},${diaCy - diaSize} `
-                                  + `${cx + diaSize},${diaCy} `
-                                  + `${cx},${diaCy + diaSize} `
-                                  + `${cx - diaSize},${diaCy}`,
+                            points: `${cx},${barCy - diaSize} `
+                                  + `${cx + diaSize},${barCy} `
+                                  + `${cx},${barCy + diaSize} `
+                                  + `${cx - diaSize},${barCy}`,
                         }));
 
                         // data-id on the foreignObject so hover/click on
