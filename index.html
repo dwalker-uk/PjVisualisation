@@ -242,6 +242,35 @@
             cursor: pointer;
         }
 
+
+        .date-range {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .date-range input[type="month"] {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 13px;
+            font-family: inherit;
+            color-scheme: dark;
+        }
+
+        .date-range .dash { color: var(--fg-muted); }
+
+        .date-range .clear {
+            color: var(--fg-muted);
+            font-size: 12px;
+            text-decoration: none;
+            padding-left: 4px;
+        }
+
+        .date-range .clear:hover { color: var(--fg); text-decoration: underline; }
+
         .toolbar-links {
             margin-left: auto;
             display: flex;
@@ -698,6 +727,14 @@
             </label>
         </div>
 
+        <div class="date-range">
+            <span class="filter-group-label">Dates</span>
+            <input type="month" id="date-start" aria-label="Start month">
+            <span class="dash">&ndash;</span>
+            <input type="month" id="date-end" aria-label="End month">
+            <a href="#" id="date-clear" class="clear" title="Clear date range">clear</a>
+        </div>
+
         <div class="toolbar-links">
             <a href="#" id="settings-link">Sheet settings</a>
             <a href="#" id="reload-link">Reload file</a>
@@ -752,6 +789,11 @@
             typeFilter:       new Set(['benefit', 'product', 'milestone']),
             confidenceFilter: new Set(['h', 'm', 'l']),
             colourBy:         'type',     // 'type' or 'confidence'
+
+            // Date-range filter: first-of-month Dates, or null for
+            // unbounded on that side.
+            dateStart:        null,
+            dateEnd:          null,
         };
 
 
@@ -888,9 +930,13 @@
             // gets stuck on the upload screen).
             document.getElementById('excel-file').value    = '';
 
-            state.items    = [];
-            state.byId     = {};
-            state.expanded = new Set();
+            state.items     = [];
+            state.byId      = {};
+            state.expanded  = new Set();
+            state.dateStart = null;
+            state.dateEnd   = null;
+            document.getElementById('date-start').value = '';
+            document.getElementById('date-end').value   = '';
 
             document.getElementById('toolbar').hidden      = true;
             document.getElementById('chart-wrap').hidden   = true;
@@ -1240,7 +1286,23 @@
                 return false;
             }
 
+            // Date-range filter: an item is shown if its date range
+            // overlaps the [dateStart, dateEnd] window (either side may
+            // be unbounded). Items without start/end dates are not
+            // affected by the date filter.
+            if (state.dateStart && item.end   && item.end   < state.dateStart) return false;
+            if (state.dateEnd   && item.start && item.start > state.dateEnd)   return false;
+
             return true;
+        }
+
+
+        // "2026-05" -> Date(2026, 4, 1)  (first of month)
+        function parseMonthInput(value) {
+            if (!value) return null;
+            const m = /^(\d{4})-(\d{2})$/.exec(String(value).trim());
+            if (!m) return null;
+            return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
         }
 
 
@@ -1364,19 +1426,40 @@
 
             // --- Date range ---
 
-            let minDate = null, maxDate = null;
-
+            // Data extent across items that survive the current filters
+            // (so an active date filter shrinks the axis to its window).
+            let dataMin = null, dataMax = null;
             for (const it of state.items) {
-                if (it.start && (!minDate || it.start < minDate)) minDate = it.start;
-                if (it.end   && (!maxDate || it.end   > maxDate)) maxDate = it.end;
+                if (!passesFilters(it)) continue;
+                if (it.start && (!dataMin || it.start < dataMin)) dataMin = it.start;
+                if (it.end   && (!dataMax || it.end   > dataMax)) dataMax = it.end;
             }
 
-            if (!minDate || !maxDate) {
+            // Axis bounds. The filter dates take precedence; the
+            // natural extent (with one month of padding on each side
+            // and one extra past the end so the last month has room
+            // for its block to extend to) is used wherever the filter
+            // is unset.
+            let minDate = state.dateStart;
+            let maxDate = state.dateEnd
+                ? new Date(state.dateEnd.getFullYear(), state.dateEnd.getMonth() + 1, 1)
+                : null;
+
+            if (!minDate && dataMin) {
+                minDate = new Date(dataMin.getFullYear(), dataMin.getMonth() - 1, 1);
+            }
+            if (!maxDate && dataMax) {
+                maxDate = new Date(dataMax.getFullYear(), dataMax.getMonth() + 2, 1);
+            }
+
+            if (!minDate || !maxDate || minDate >= maxDate) {
                 const msg = svgEl('text', {
                     x: 24, y: 40,
                     fill: '#a8b5d1', 'font-size': 14,
                 });
-                msg.textContent = 'No usable dates found - check the start/end columns.';
+                msg.textContent = state.dateStart || state.dateEnd
+                    ? 'No items match the current date-range filter.'
+                    : 'No usable dates found - check the start/end columns.';
                 bodySvg.appendChild(msg);
                 bodySvg.setAttribute('width',  600);
                 bodySvg.setAttribute('height', 80);
@@ -1384,12 +1467,21 @@
                 return;
             }
 
-            // Pad by 1 month each side and 1 extra past the end so the
-            // last month's block has somewhere to extend to.
-            minDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, 1);
-            maxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 2, 1);
-
             const totalMonths = monthsBetween(minDate, maxDate);
+
+            // The last month visible on the axis (used to clip bars
+            // that extend beyond the chart).
+            const lastVisibleMonth = new Date(
+                maxDate.getFullYear(),
+                maxDate.getMonth() - 1,
+                1,
+            );
+
+            function clampDate(d) {
+                if (d < minDate)          return minDate;
+                if (d > lastVisibleMonth) return lastVisibleMonth;
+                return d;
+            }
 
 
             // --- Horizontal sizing ---
@@ -1771,8 +1863,14 @@
 
                     } else {
 
-                        const x0 = xForMonthStart(it.start);
-                        const x1 = xForMonthEnd(it.end);
+                        // Clamp the displayed range to the visible
+                        // axis so an active date filter just truncates
+                        // bars at the chart edge instead of letting
+                        // them overflow.
+                        const drawStart = clampDate(it.start);
+                        const drawEnd   = clampDate(it.end);
+                        const x0        = xForMonthStart(drawStart);
+                        const x1        = xForMonthEnd(drawEnd);
 
                         rowG.appendChild(svgEl('rect', {
                             class: 'bar',
@@ -1786,8 +1884,9 @@
 
                         // Type-benefit numbered rows also get an
                         // end-marker (a star) at the right edge of the
-                        // block to mark where the benefit is delivered.
-                        if (it.type === 'benefit') {
+                        // block - but only if the real end falls
+                        // within the visible window.
+                        if (it.type === 'benefit' && it.end <= lastVisibleMonth) {
                             const cx = x1;
                             const cy = barY + barH / 2;
                             const s  = barH / 1.5;
@@ -1920,6 +2019,26 @@
 
         document.getElementById('colour-by').addEventListener('change', (e) => {
             state.colourBy = e.target.value;
+            render();
+        });
+
+
+        document.getElementById('date-start').addEventListener('change', (e) => {
+            state.dateStart = parseMonthInput(e.target.value);
+            render();
+        });
+
+        document.getElementById('date-end').addEventListener('change', (e) => {
+            state.dateEnd = parseMonthInput(e.target.value);
+            render();
+        });
+
+        document.getElementById('date-clear').addEventListener('click', (e) => {
+            e.preventDefault();
+            state.dateStart = null;
+            state.dateEnd   = null;
+            document.getElementById('date-start').value = '';
+            document.getElementById('date-end').value   = '';
             render();
         });
 
