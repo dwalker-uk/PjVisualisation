@@ -30,6 +30,11 @@
             --benefit:     #3ec7c9;
             --product:     #f0b429;
             --milestone:   #ff6b6b;
+
+            --high:        #4ec97a;
+            --medium:      #f4d35e;
+            --low:         #ee5253;
+            --unknown:     #6a85ba;
         }
 
 
@@ -173,12 +178,15 @@
             letter-spacing: 0.4px;
         }
 
-        .type-toggles {
+        .type-toggles,
+        .conf-toggles {
             display: flex;
             gap: 16px;
+            align-items: center;
         }
 
-        .type-toggles label {
+        .type-toggles label,
+        .conf-toggles label {
             display: flex;
             align-items: center;
             gap: 7px;
@@ -186,16 +194,53 @@
             user-select: none;
         }
 
-        .type-toggles .swatch {
+        .filter-group-label {
+            color: var(--fg-muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            margin-right: 2px;
+        }
+
+        .swatch {
             display: inline-block;
             width: 12px;
             height: 12px;
             border-radius: 3px;
         }
+        .swatch.diamond { border-radius: 0; transform: rotate(45deg); }
 
         .swatch.benefit   { background: var(--benefit);   }
         .swatch.product   { background: var(--product);   }
         .swatch.milestone { background: var(--milestone); }
+        .swatch.high      { background: var(--high);      }
+        .swatch.medium    { background: var(--medium);    }
+        .swatch.low       { background: var(--low);       }
+
+
+        .colour-mode {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .colour-mode label {
+            color: var(--fg-muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        #colour-by {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            padding: 4px 24px 4px 8px;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+        }
 
         .toolbar-links {
             margin-left: auto;
@@ -318,14 +363,66 @@
                 transform 140ms ease;
             transform-box: fill-box;
             transform-origin: center;
+            fill: var(--unknown);
         }
 
-        .row[data-type="benefit"]   .bar,
-        .row[data-type="benefit"]   .marker { fill: var(--benefit);   }
-        .row[data-type="product"]   .bar,
-        .row[data-type="product"]   .marker { fill: var(--product);   }
-        .row[data-type="milestone"] .bar,
-        .row[data-type="milestone"] .marker { fill: var(--milestone); }
+        /*
+         * Fill colours are driven by data-colour on each individual
+         * bar / marker so we can switch the entire chart between
+         * "Colour by type" and "Colour by confidence" without
+         * re-classing every row.
+         */
+        [data-colour="benefit"]   { fill: var(--benefit);   }
+        [data-colour="product"]   { fill: var(--product);   }
+        [data-colour="milestone"] { fill: var(--milestone); }
+        [data-colour="high"]      { fill: var(--high);      }
+        [data-colour="medium"]    { fill: var(--medium);    }
+        [data-colour="low"]       { fill: var(--low);       }
+        [data-colour="unknown"]   { fill: var(--unknown);   }
+
+
+        /* Benefit children (b-level) plotted in the parent's row */
+
+        .benefit-marker {
+            cursor: pointer;
+            stroke: transparent;
+            stroke-width: 0;
+            transition:
+                filter 140ms ease,
+                stroke 140ms ease,
+                stroke-width 140ms ease;
+        }
+
+        .benefit-marker:hover {
+            filter: brightness(1.18) url(#hover-glow);
+            stroke: #ffffff;
+            stroke-width: 1.5;
+        }
+
+        .benefit-label {
+            color: var(--fg);
+            font-family: inherit;
+            text-align: center;
+            line-height: 1.15;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            user-select: none;
+            overflow-wrap: anywhere;
+        }
+
+        /*
+         * The end-diamond on a type=benefit numbered row sits at the
+         * right edge of the gantt block. Render it on top of the bar
+         * so its outline is visible.
+         */
+        .end-diamond {
+            stroke: rgba(255, 255, 255, 0.85);
+            stroke-width: 1.25;
+        }
 
         .bar:hover, .marker:hover {
             filter: brightness(1.18) url(#hover-glow);
@@ -495,8 +592,14 @@
         <div class="hint">
             Expected columns: <code>theme</code>, <code>title</code>,
             <code>start</code>, <code>end</code>, <code>description</code>,
-            <code>level</code> (1-3), <code>type</code>
-            (benefit / product / milestone).
+            <code>level</code> (1-3 or <code>b</code>), <code>type</code>
+            (benefit / product / milestone), <code>confidence</code>
+            (h / m / l - optional).
+            <br><br>
+            A level of <code>b</code> marks the row as a benefit
+            associated with the most recent numbered row above it;
+            benefit rows are drawn as a small diamond inside their
+            parent's row at the benefit's start date.
         </div>
 
     </div>
@@ -542,7 +645,16 @@
 
         <span class="brand">Roadmap Visualiser</span>
 
+        <div class="colour-mode">
+            <label for="colour-by">Colour by</label>
+            <select id="colour-by">
+                <option value="type">Type</option>
+                <option value="confidence">Confidence</option>
+            </select>
+        </div>
+
         <div class="type-toggles">
+            <span class="filter-group-label">Type</span>
             <label>
                 <input type="checkbox" data-type="benefit" checked>
                 <span class="swatch benefit"></span>
@@ -557,6 +669,25 @@
                 <input type="checkbox" data-type="milestone" checked>
                 <span class="swatch milestone"></span>
                 Milestone
+            </label>
+        </div>
+
+        <div class="conf-toggles">
+            <span class="filter-group-label">Confidence</span>
+            <label>
+                <input type="checkbox" data-conf="h" checked>
+                <span class="swatch high"></span>
+                High
+            </label>
+            <label>
+                <input type="checkbox" data-conf="m" checked>
+                <span class="swatch medium"></span>
+                Medium
+            </label>
+            <label>
+                <input type="checkbox" data-conf="l" checked>
+                <span class="swatch low"></span>
+                Low
             </label>
         </div>
 
@@ -607,11 +738,13 @@
          */
 
         const state = {
-            workbook:    null,
-            items:       [],
-            byId:        {},
-            expanded:    new Set(),
-            typeFilter:  new Set(['benefit', 'product', 'milestone']),
+            workbook:         null,
+            items:            [],
+            byId:             {},
+            expanded:         new Set(),
+            typeFilter:       new Set(['benefit', 'product', 'milestone']),
+            confidenceFilter: new Set(['h', 'm', 'l']),
+            colourBy:         'type',     // 'type' or 'confidence'
         };
 
 
@@ -648,6 +781,13 @@
             rowHeight:  { 1: 48, 2: 40, 3: 30 },
             barHeight:  { 1: 22, 2: 16, 3: 12 },
             fontSize:   { 1: 17, 2: 14, 3: 11 },
+
+            // Extra vertical space appended to a row when it has any
+            // visible benefit-children to render. Sized for a small
+            // diamond plus a wrapped 1-2 line label below.
+            benefitZoneHeight: { 1: 36, 2: 32, 3: 28 },
+            benefitDiamondSize: { 1: 11, 2: 9, 3: 8 },
+            benefitFontSize:    { 1: 11, 2: 10, 3: 9 },
 
             // Auto-fit floor: the chart will not scale rows below this
             // fraction of their natural height even if content exceeds
@@ -841,10 +981,12 @@
             description: ['description', 'summary', 'summary description', 'notes'],
             level:       ['level'],
             type:        ['type', 'category'],
+            confidence:  ['confidence', 'delivery confidence', 'conf'],
         };
 
 
         const KNOWN_TYPES = ['benefit', 'product', 'milestone'];
+        const KNOWN_CONFS = ['h', 'm', 'l'];
 
 
         function loadData(sheet, topLeftRef, skipHeaderRows) {
@@ -893,7 +1035,7 @@
             }
 
             // Fallback to positional order for any header we didn't recognise.
-            const positional = ['theme', 'title', 'start', 'end', 'description', 'level', 'type'];
+            const positional = ['theme', 'title', 'start', 'end', 'description', 'level', 'type', 'confidence'];
             for (let i = 0; i < positional.length; i++) {
                 if (columnIndex[positional[i]] === -1 && i < headerRow.length) {
                     columnIndex[positional[i]] = i;
@@ -912,11 +1054,31 @@
                 const start = parseMonthYear(row[columnIndex.start]);
                 const end   = parseMonthYear(row[columnIndex.end]) || start;
 
-                let level = parseInt(row[columnIndex.level], 10);
-                if (isNaN(level) || level < 1 || level > 3) level = 1;
+                // level can be 1-3 or "b" (this row is a benefit
+                // attached to the previous non-benefit row).
+                const levelRaw = String(row[columnIndex.level] || '').trim().toLowerCase();
+                let level = null;
+                let isBenefit = false;
+
+                if (levelRaw === 'b') {
+                    isBenefit = true;
+                    // Level is inherited from the parent during the
+                    // parent-inference pass below; benefits aren't
+                    // rendered as their own rows.
+                } else {
+                    level = parseInt(levelRaw, 10);
+                    if (isNaN(level) || level < 1 || level > 3) level = 1;
+                }
 
                 let type = String(row[columnIndex.type] || '').trim().toLowerCase();
                 if (!KNOWN_TYPES.includes(type)) type = 'milestone';
+
+                let conf = String(row[columnIndex.confidence] != null
+                                ? row[columnIndex.confidence] : '').trim().toLowerCase();
+                if (conf === 'high')                          conf = 'h';
+                else if (conf === 'medium' || conf === 'med') conf = 'm';
+                else if (conf === 'low')                      conf = 'l';
+                if (!KNOWN_CONFS.includes(conf))              conf = null;
 
                 items.push({
                     id:          'item-' + i,
@@ -926,9 +1088,12 @@
                     start:       start,
                     end:         end,
                     level:       level,
+                    isBenefit:   isBenefit,
                     type:        type,
+                    confidence:  conf,
                     parentId:    null,
-                    childIds:    [],
+                    childIds:    [],         // numbered children (level n -> n+1)
+                    benefitIds:  [],         // b-level children rendered in this row
                 });
             }
 
@@ -936,17 +1101,35 @@
                 throw new Error('No rows with a title were found.');
             }
 
-            // Parent inference: walk upwards to first row with level n-1.
+            // Parent inference:
+            //   - "b" rows attach to the most recent non-benefit row above
+            //     (regardless of its numbered level), and inherit that
+            //     row's level for grouping purposes.
+            //   - Numbered rows at level > 1 attach to the most recent
+            //     non-benefit row with level (n - 1).
             for (let i = 0; i < items.length; i++) {
 
                 const item = items[i];
-                if (item.level === 1) continue;
 
-                for (let j = i - 1; j >= 0; j--) {
-                    if (items[j].level === item.level - 1) {
-                        item.parentId = items[j].id;
-                        items[j].childIds.push(item.id);
-                        break;
+                if (item.isBenefit) {
+
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (!items[j].isBenefit) {
+                            item.parentId = items[j].id;
+                            item.level    = items[j].level;
+                            items[j].benefitIds.push(item.id);
+                            break;
+                        }
+                    }
+
+                } else if (item.level > 1) {
+
+                    for (let j = i - 1; j >= 0; j--) {
+                        if (!items[j].isBenefit && items[j].level === item.level - 1) {
+                            item.parentId = items[j].id;
+                            items[j].childIds.push(item.id);
+                            break;
+                        }
                     }
                 }
             }
@@ -1022,13 +1205,29 @@
          * ================================================================
          */
 
+        function passesFilters(item) {
+
+            if (!state.typeFilter.has(item.type)) return false;
+
+            // Items without a confidence value are not filtered out by
+            // the confidence checkboxes; only explicitly-tagged items
+            // are filtered.
+            if (item.confidence && !state.confidenceFilter.has(item.confidence)) {
+                return false;
+            }
+
+            return true;
+        }
+
+
         function visibleItems() {
 
             const out = [];
 
             function pushWithChildren(item) {
 
-                if (!state.typeFilter.has(item.type)) return;
+                if (item.isBenefit)         return;   // rendered in parent's row
+                if (!passesFilters(item))   return;
 
                 out.push(item);
 
@@ -1040,10 +1239,28 @@
             }
 
             for (const item of state.items) {
-                if (item.level === 1) pushWithChildren(item);
+                if (item.level === 1 && !item.isBenefit) pushWithChildren(item);
             }
 
             return out;
+        }
+
+
+        function visibleBenefitsFor(item) {
+            return item.benefitIds
+                .map(id => state.byId[id])
+                .filter(b => passesFilters(b));
+        }
+
+
+        function colourKey(item) {
+            if (state.colourBy === 'confidence') {
+                if (item.confidence === 'h') return 'high';
+                if (item.confidence === 'm') return 'medium';
+                if (item.confidence === 'l') return 'low';
+                return 'unknown';
+            }
+            return item.type;
         }
 
 
@@ -1138,6 +1355,13 @@
 
             const visible = visibleItems();
 
+            // Pre-compute which benefits are visible for each row so the
+            // sizing and layout passes agree on what's drawn.
+            const visibleBenefits = {};
+            for (const it of visible) {
+                visibleBenefits[it.id] = visibleBenefitsFor(it);
+            }
+
             // Natural (un-scaled) body height needed for everything.
             let themeRunCount = 0;
             {
@@ -1149,7 +1373,13 @@
 
             const naturalBody = LAYOUT.bodyMarginTop
                 + themeRunCount * LAYOUT.themeHeaderHeight
-                + visible.reduce((s, it) => s + LAYOUT.rowHeight[it.level], 0)
+                + visible.reduce((s, it) => {
+                    let h = LAYOUT.rowHeight[it.level];
+                    if (visibleBenefits[it.id].length > 0) {
+                        h += LAYOUT.benefitZoneHeight[it.level];
+                    }
+                    return s + h;
+                }, 0)
                 + LAYOUT.bodyMarginBottom;
 
             const availableBody = window.innerHeight
@@ -1162,22 +1392,21 @@
                 scale = Math.max(LAYOUT.minAutoFitScale, availableBody / naturalBody);
             }
 
+            function scaleMap(table) {
+                return {
+                    1: table[1] * scale,
+                    2: table[2] * scale,
+                    3: table[3] * scale,
+                };
+            }
+
             const sized = {
-                rowHeight: {
-                    1: LAYOUT.rowHeight[1] * scale,
-                    2: LAYOUT.rowHeight[2] * scale,
-                    3: LAYOUT.rowHeight[3] * scale,
-                },
-                barHeight: {
-                    1: LAYOUT.barHeight[1] * scale,
-                    2: LAYOUT.barHeight[2] * scale,
-                    3: LAYOUT.barHeight[3] * scale,
-                },
-                fontSize: {
-                    1: LAYOUT.fontSize[1] * scale,
-                    2: LAYOUT.fontSize[2] * scale,
-                    3: LAYOUT.fontSize[3] * scale,
-                },
+                rowHeight:         scaleMap(LAYOUT.rowHeight),
+                barHeight:         scaleMap(LAYOUT.barHeight),
+                fontSize:          scaleMap(LAYOUT.fontSize),
+                benefitZoneHeight: scaleMap(LAYOUT.benefitZoneHeight),
+                benefitDiamondSize:scaleMap(LAYOUT.benefitDiamondSize),
+                benefitFontSize:   scaleMap(LAYOUT.benefitFontSize),
                 themeHeaderHeight: LAYOUT.themeHeaderHeight * scale,
                 themeFontSize:     15 * Math.max(scale, 0.75),
             };
@@ -1186,6 +1415,7 @@
             // --- Vertical layout (in body-SVG coords; axis is separate) ---
 
             const rowY       = {};
+            const rowHTotal  = {};        // total height per row (bar zone + benefit zone)
             const themeBands = [];        // [{ theme, headerY, yTop, yBot }]
 
             let y           = LAYOUT.bodyMarginTop;
@@ -1208,8 +1438,15 @@
                     y += sized.themeHeaderHeight;
                 }
 
-                rowY[it.id] = y;
-                y += sized.rowHeight[it.level];
+                const barZ = sized.rowHeight[it.level];
+                const benZ = visibleBenefits[it.id].length > 0
+                    ? sized.benefitZoneHeight[it.level]
+                    : 0;
+
+                rowY[it.id]      = y;
+                rowHTotal[it.id] = barZ + benZ;
+
+                y += barZ + benZ;
             }
             if (currentBand) currentBand.yBot = y;
 
@@ -1366,12 +1603,14 @@
 
             for (const it of visible) {
 
-                const ry      = rowY[it.id];
-                const rh      = sized.rowHeight[it.level];
-                const indent  = (it.level - 1) * LAYOUT.labelIndent;
-                const isExp   = state.expanded.has(it.id);
-                const expand  = it.childIds.length > 0 && it.level < 3;
-                const fs      = sized.fontSize[it.level];
+                const ry        = rowY[it.id];
+                const barZone   = sized.rowHeight[it.level];
+                const rh        = rowHTotal[it.id];
+                const indent    = (it.level - 1) * LAYOUT.labelIndent;
+                const isExp     = state.expanded.has(it.id);
+                const expand    = it.childIds.length > 0 && it.level < 3;
+                const fs        = sized.fontSize[it.level];
+                const benefits  = visibleBenefits[it.id];
 
                 const rowG = svgEl('g', {
                     class: 'row'
@@ -1385,7 +1624,9 @@
                 rowsG.appendChild(rowG);
 
 
-                // Row background (catches hover + click).
+                // Row background spans the whole row including the
+                // benefit zone, so hovers and clicks still register
+                // anywhere on the row.
                 rowG.appendChild(svgEl('rect', {
                     class: 'row-bg',
                     x: 0, y: 0,
@@ -1398,11 +1639,13 @@
 
 
                 // Expand icon (only if it has children that can be shown).
+                // Vertically centred against the bar zone, not the
+                // whole (possibly extended) row.
                 if (expand) {
                     const tri = svgEl('text', {
                         class: 'expand-icon',
                         x: triX,
-                        y: rh / 2 + fs / 3,
+                        y: barZone / 2 + fs / 3,
                         'font-size': fs,
                     });
                     tri.textContent = isExp ? '▾' : '▸';
@@ -1410,16 +1653,15 @@
                 }
 
 
-                // Title label - HTML inside foreignObject so it wraps
-                // and ellipsis-truncates naturally. Vertically centred
-                // via the flex wrapper.
+                // Title label - HTML inside foreignObject. Sits in the
+                // bar zone (the top part of the row).
                 const labelWidth = Math.max(20, labelAreaEnd - labelX);
 
                 const fo = svgEl('foreignObject', {
                     x: labelX,
                     y: 1,
                     width:  labelWidth,
-                    height: rh - 2,
+                    height: barZone - 2,
                 });
 
                 const center = document.createElementNS(XHTML_NS, 'div');
@@ -1428,7 +1670,7 @@
                 center.style.height        = '100%';
 
                 const lineHeight    = 1.18;
-                const maxLines      = Math.max(1, Math.floor((rh - 4) / (fs * lineHeight)));
+                const maxLines      = Math.max(1, Math.floor((barZone - 4) / (fs * lineHeight)));
 
                 const label = document.createElementNS(XHTML_NS, 'div');
                 label.setAttribute('class', 'row-label');
@@ -1443,12 +1685,12 @@
                 rowG.appendChild(fo);
 
 
-                // Bar or marker.
+                // Bar or marker for the row's own date range.
                 if (it.start && it.end) {
 
                     const isPoint = it.start.getTime() === it.end.getTime();
                     const barH    = sized.barHeight[it.level];
-                    const barY    = (rh - barH) / 2;
+                    const barY    = (barZone - barH) / 2;
 
                     if (isPoint) {
 
@@ -1458,7 +1700,8 @@
 
                         rowG.appendChild(svgEl('polygon', {
                             class: 'marker diamond',
-                            'data-id': it.id,
+                            'data-id':     it.id,
+                            'data-colour': colourKey(it),
                             points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
                         }));
 
@@ -1469,12 +1712,79 @@
 
                         rowG.appendChild(svgEl('rect', {
                             class: 'bar',
-                            'data-id': it.id,
+                            'data-id':     it.id,
+                            'data-colour': colourKey(it),
                             x: x0, y: barY,
                             width: Math.max(x1 - x0, 4),
                             height: barH,
                             rx: 3, ry: 3,
                         }));
+
+                        // Type-benefit numbered rows also get a diamond
+                        // at the right edge of the block to mark where
+                        // the benefit is delivered.
+                        if (it.type === 'benefit') {
+                            const cx = x1;
+                            const cy = barY + barH / 2;
+                            const s  = barH / 1.5;
+                            rowG.appendChild(svgEl('polygon', {
+                                class: 'marker end-diamond',
+                                'data-id':     it.id,
+                                'data-colour': colourKey(it),
+                                points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                            }));
+                        }
+                    }
+                }
+
+
+                // Benefit children (b-level rows) plotted in this row.
+                if (benefits.length > 0) {
+
+                    const benZoneY = barZone;
+                    const benH     = sized.benefitZoneHeight[it.level];
+                    const diaSize  = sized.benefitDiamondSize[it.level];
+                    const benFs    = sized.benefitFontSize[it.level];
+                    const diaCy    = benZoneY + diaSize / 2 + 3;
+                    const lblY     = diaCy + diaSize / 2 + 2;
+                    const lblH     = Math.max(8, benH - (lblY - benZoneY) - 2);
+                    const lblW     = Math.max(monthWidth * 1.4, 70);
+
+                    for (const b of benefits) {
+
+                        if (!b.start) continue;
+
+                        const cx = xForMonthStart(b.start) + monthWidth / 2;
+
+                        rowG.appendChild(svgEl('polygon', {
+                            class: 'benefit-marker',
+                            'data-id':     b.id,
+                            'data-colour': colourKey(b),
+                            points: `${cx},${diaCy - diaSize} `
+                                  + `${cx + diaSize},${diaCy} `
+                                  + `${cx},${diaCy + diaSize} `
+                                  + `${cx - diaSize},${diaCy}`,
+                        }));
+
+                        // data-id on the foreignObject so hover/click on
+                        // the label resolves to this benefit, not the
+                        // parent row underneath it.
+                        const bfo = svgEl('foreignObject', {
+                            'data-id': b.id,
+                            x: cx - lblW / 2,
+                            y: lblY,
+                            width:  lblW,
+                            height: lblH,
+                        });
+
+                        const blbl = document.createElementNS(XHTML_NS, 'div');
+                        blbl.setAttribute('class', 'benefit-label');
+                        blbl.style.fontSize    = benFs + 'px';
+                        blbl.style.lineHeight  = '1.15';
+                        blbl.textContent       = b.title;
+
+                        bfo.appendChild(blbl);
+                        rowG.appendChild(bfo);
                     }
                 }
             }
@@ -1500,7 +1810,7 @@
                 const parentIndentX = parentTriX + 6;
                 const childIndentX  = childTriX  - 4;
 
-                const startY = rowY[parent.id] + sized.rowHeight[parent.level];
+                const startY = rowY[parent.id] + rowHTotal[parent.id];
                 const endY   = rowY[it.id]     + sized.rowHeight[it.level] / 2;
 
                 connG.appendChild(svgEl('path', {
@@ -1530,7 +1840,33 @@
         });
 
 
+        document.querySelectorAll('.conf-toggles input').forEach(cb => {
+            cb.addEventListener('change', () => {
+
+                if (cb.checked) state.confidenceFilter.add(cb.dataset.conf);
+                else            state.confidenceFilter.delete(cb.dataset.conf);
+
+                render();
+            });
+        });
+
+
+        document.getElementById('colour-by').addEventListener('change', (e) => {
+            state.colourBy = e.target.value;
+            render();
+        });
+
+
         document.getElementById('body-chart').addEventListener('click', (e) => {
+
+            // If a benefit element was clicked, do nothing - benefits
+            // aren't expandable, and we don't want a misclick to expand
+            // the host row.
+            const hit = e.target.closest('[data-id]');
+            if (hit) {
+                const hitItem = state.byId[hit.dataset.id];
+                if (hitItem && hitItem.isBenefit) return;
+            }
 
             const rowG = e.target.closest('.row.expandable');
             if (!rowG) return;
@@ -1578,12 +1914,18 @@
                 ? formatMonthYear(item.start)
                 : (formatMonthYear(item.start) + '  -  ' + formatMonthYear(item.end));
 
+            const levelText = item.isBenefit ? 'benefit' : ('level ' + item.level);
+            const confText  = item.confidence
+                ? ({ h: 'high', m: 'medium', l: 'low' })[item.confidence] + ' confidence'
+                : null;
+
             tooltip.innerHTML =
                 '<div class="tt-title">' + escapeHtml(item.title) + '</div>'
               + '<div class="tt-meta">'
               +     escapeHtml(item.theme) + ' &middot; '
               +     escapeHtml(item.type)  + ' &middot; '
-              +     'level ' + item.level
+              +     levelText
+              +     (confText ? ' &middot; ' + escapeHtml(confText) : '')
               + '</div>'
               + '<div class="tt-date">' + dateLine + '</div>'
               + '<div class="tt-desc">'
