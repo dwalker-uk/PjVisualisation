@@ -732,7 +732,7 @@
             <input type="month" id="date-start" aria-label="Start month">
             <span class="dash">&ndash;</span>
             <input type="month" id="date-end" aria-label="End month">
-            <a href="#" id="date-clear" class="clear" title="Clear date range">clear</a>
+            <a href="#" id="date-reset" class="clear" title="Reset date range to the full data extent">show all</a>
         </div>
 
         <div class="toolbar-links">
@@ -790,10 +790,14 @@
             confidenceFilter: new Set(['h', 'm', 'l']),
             colourBy:         'type',     // 'type' or 'confidence'
 
-            // Date-range filter: first-of-month Dates, or null for
-            // unbounded on that side.
+            // Date-range filter: first-of-month Dates, or null when
+            // the data has no usable dates at all. They default to the
+            // full extent of the loaded data, so the "show all" action
+            // restores them to that extent without erasing them.
             dateStart:        null,
             dateEnd:          null,
+            dataDateMin:      null,
+            dataDateMax:      null,
         };
 
 
@@ -930,11 +934,13 @@
             // gets stuck on the upload screen).
             document.getElementById('excel-file').value    = '';
 
-            state.items     = [];
-            state.byId      = {};
-            state.expanded  = new Set();
-            state.dateStart = null;
-            state.dateEnd   = null;
+            state.items       = [];
+            state.byId        = {};
+            state.expanded    = new Set();
+            state.dateStart   = null;
+            state.dateEnd     = null;
+            state.dataDateMin = null;
+            state.dataDateMax = null;
             document.getElementById('date-start').value = '';
             document.getElementById('date-end').value   = '';
 
@@ -981,6 +987,11 @@
                 alert('Could not load data: ' + err.message);
                 return;
             }
+
+            // Populate the toolbar's date inputs with the data extent
+            // (set in loadData) so they always show a usable default.
+            document.getElementById('date-start').value = formatMonthInput(state.dataDateMin);
+            document.getElementById('date-end').value   = formatMonthInput(state.dataDateMax);
 
             document.getElementById('sheet-picker').hidden = true;
             document.getElementById('toolbar').hidden      = false;
@@ -1207,6 +1218,18 @@
             state.items    = items;
             state.byId     = Object.fromEntries(items.map(it => [it.id, it]));
             state.expanded = new Set();
+
+            // Full date extent of the loaded data, used as the default
+            // window for the toolbar's date-range filter.
+            let dMin = null, dMax = null;
+            for (const it of items) {
+                if (it.start && (!dMin || it.start < dMin)) dMin = it.start;
+                if (it.end   && (!dMax || it.end   > dMax)) dMax = it.end;
+            }
+            state.dataDateMin = dMin;
+            state.dataDateMax = dMax;
+            state.dateStart   = dMin;
+            state.dateEnd     = dMax;
         }
 
 
@@ -1303,6 +1326,11 @@
             const m = /^(\d{4})-(\d{2})$/.exec(String(value).trim());
             if (!m) return null;
             return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
+        }
+
+        function formatMonthInput(d) {
+            if (!d) return '';
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
         }
 
 
@@ -2033,12 +2061,12 @@
             render();
         });
 
-        document.getElementById('date-clear').addEventListener('click', (e) => {
+        document.getElementById('date-reset').addEventListener('click', (e) => {
             e.preventDefault();
-            state.dateStart = null;
-            state.dateEnd   = null;
-            document.getElementById('date-start').value = '';
-            document.getElementById('date-end').value   = '';
+            state.dateStart = state.dataDateMin;
+            state.dateEnd   = state.dataDateMax;
+            document.getElementById('date-start').value = formatMonthInput(state.dataDateMin);
+            document.getElementById('date-end').value   = formatMonthInput(state.dataDateMax);
             render();
         });
 
