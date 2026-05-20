@@ -242,6 +242,35 @@
             cursor: pointer;
         }
 
+
+        .date-range {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .date-range input[type="month"] {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            padding: 4px 6px;
+            font-size: 13px;
+            font-family: inherit;
+            color-scheme: dark;
+        }
+
+        .date-range .dash { color: var(--fg-muted); }
+
+        .date-range .clear {
+            color: var(--fg-muted);
+            font-size: 12px;
+            text-decoration: none;
+            padding-left: 4px;
+        }
+
+        .date-range .clear:hover { color: var(--fg); text-decoration: underline; }
+
         .toolbar-links {
             margin-left: auto;
             display: flex;
@@ -383,23 +412,30 @@
 
         /* Benefit children (b-level) plotted in the parent's row */
 
-        .benefit-marker {
+        /*
+         * Overlay markers (benefits + single-point children) sit on
+         * top of the parent's gantt bar. A light outline keeps them
+         * visible even when their fill matches the bar beneath them.
+         * Benefits are drawn as stars, milestones / products as
+         * diamonds.
+         */
+        .overlay-marker {
             cursor: pointer;
-            stroke: transparent;
-            stroke-width: 0;
+            stroke: rgba(255, 255, 255, 0.9);
+            stroke-width: 1.25;
             transition:
                 filter 140ms ease,
                 stroke 140ms ease,
                 stroke-width 140ms ease;
         }
 
-        .benefit-marker:hover {
+        .overlay-marker:hover {
             filter: brightness(1.18) url(#hover-glow);
             stroke: #ffffff;
-            stroke-width: 1.5;
+            stroke-width: 2;
         }
 
-        .benefit-label {
+        .overlay-label {
             color: var(--fg);
             font-family: inherit;
             text-align: center;
@@ -415,11 +451,10 @@
         }
 
         /*
-         * The end-diamond on a type=benefit numbered row sits at the
-         * right edge of the gantt block. Render it on top of the bar
-         * so its outline is visible.
+         * The end-marker on a type=benefit numbered range row sits at
+         * the right edge of the gantt block.
          */
-        .end-diamond {
+        .end-marker {
             stroke: rgba(255, 255, 255, 0.85);
             stroke-width: 1.25;
         }
@@ -596,10 +631,11 @@
             (benefit / product / milestone), <code>confidence</code>
             (h / m / l - optional).
             <br><br>
-            A level of <code>b</code> marks the row as a benefit
-            associated with the most recent numbered row above it;
-            benefit rows are drawn as a small diamond inside their
-            parent's row at the benefit's start date.
+            Benefits (<code>type = benefit</code> or
+            <code>level = b</code>) are drawn as stars, everything else
+            as diamonds when shown as a point. Any sub-row with
+            <code>start = end</code> overlays its parent's gantt bar
+            instead of taking its own row.
         </div>
 
     </div>
@@ -691,6 +727,14 @@
             </label>
         </div>
 
+        <div class="date-range">
+            <span class="filter-group-label">Dates</span>
+            <input type="month" id="date-start" aria-label="Start month">
+            <span class="dash">&ndash;</span>
+            <input type="month" id="date-end" aria-label="End month">
+            <a href="#" id="date-clear" class="clear" title="Clear date range">clear</a>
+        </div>
+
         <div class="toolbar-links">
             <a href="#" id="settings-link">Sheet settings</a>
             <a href="#" id="reload-link">Reload file</a>
@@ -745,6 +789,11 @@
             typeFilter:       new Set(['benefit', 'product', 'milestone']),
             confidenceFilter: new Set(['h', 'm', 'l']),
             colourBy:         'type',     // 'type' or 'confidence'
+
+            // Date-range filter: first-of-month Dates, or null for
+            // unbounded on that side.
+            dateStart:        null,
+            dateEnd:          null,
         };
 
 
@@ -783,11 +832,12 @@
             fontSize:   { 1: 17, 2: 14, 3: 11 },
 
             // Extra vertical space appended to a row when it has any
-            // visible benefit-children to render. Sized for a small
-            // diamond plus a wrapped 1-2 line label below.
-            benefitZoneHeight: { 1: 36, 2: 32, 3: 28 },
-            benefitDiamondSize: { 1: 11, 2: 9, 3: 8 },
-            benefitFontSize:    { 1: 11, 2: 10, 3: 9 },
+            // visible benefit-children. The benefit diamonds themselves
+            // sit on top of the parent's gantt bar, so this zone only
+            // needs to fit the wrapped 2-line caption beneath the bar.
+            benefitZoneHeight:  { 1: 28, 2: 26, 3: 22 },
+            benefitDiamondSize: { 1: 8,  2: 6,  3: 5  },
+            benefitFontSize:    { 1: 11, 2: 10, 3: 9  },
 
             // Auto-fit floor: the chart will not scale rows below this
             // fraction of their natural height even if content exceeds
@@ -880,9 +930,13 @@
             // gets stuck on the upload screen).
             document.getElementById('excel-file').value    = '';
 
-            state.items    = [];
-            state.byId     = {};
-            state.expanded = new Set();
+            state.items     = [];
+            state.byId      = {};
+            state.expanded  = new Set();
+            state.dateStart = null;
+            state.dateEnd   = null;
+            document.getElementById('date-start').value = '';
+            document.getElementById('date-end').value   = '';
 
             document.getElementById('toolbar').hidden      = true;
             document.getElementById('chart-wrap').hidden   = true;
@@ -1080,6 +1134,9 @@
                 else if (conf === 'low')                      conf = 'l';
                 if (!KNOWN_CONFS.includes(conf))              conf = null;
 
+                const isPoint = start != null && end != null
+                             && start.getTime() === end.getTime();
+
                 items.push({
                     id:          'item-' + i,
                     theme:       String(row[columnIndex.theme] || '').trim() || '(unspecified)',
@@ -1089,11 +1146,12 @@
                     end:         end,
                     level:       level,
                     isBenefit:   isBenefit,
+                    isPoint:     isPoint,
                     type:        type,
                     confidence:  conf,
                     parentId:    null,
-                    childIds:    [],         // numbered children (level n -> n+1)
-                    benefitIds:  [],         // b-level children rendered in this row
+                    childIds:    [],         // range children that get their own rows when expanded
+                    overlayIds:  [],         // benefits + point-children rendered on this row's bar
                 });
             }
 
@@ -1102,24 +1160,32 @@
             }
 
             // Parent inference:
-            //   - "b" rows attach to the most recent non-benefit row above
-            //     (regardless of its numbered level), and inherit that
-            //     row's level for grouping purposes.
+            //   - "b" rows attach to the most recent non-benefit row
+            //     above and inherit that row's level for grouping.
             //   - Numbered rows at level > 1 attach to the most recent
-            //     non-benefit row with level (n - 1).
+            //     non-benefit row with level (n - 1):
+            //         * range children (start != end) become normal
+            //           children that expand into their own row
+            //         * point children (start == end) become overlay
+            //           markers on the parent's bar instead, just like
+            //           benefits do
             for (let i = 0; i < items.length; i++) {
 
                 const item = items[i];
 
                 if (item.isBenefit) {
 
+                    // Walk up to the first row that's actually rendered
+                    // as its own row - i.e. not a "b" benefit and not a
+                    // point-with-parent (which is itself an overlay).
                     for (let j = i - 1; j >= 0; j--) {
-                        if (!items[j].isBenefit) {
-                            item.parentId = items[j].id;
-                            item.level    = items[j].level;
-                            items[j].benefitIds.push(item.id);
-                            break;
-                        }
+                        const cand = items[j];
+                        if (cand.isBenefit)                          continue;
+                        if (cand.parentId && cand.isPoint)           continue;
+                        item.parentId = cand.id;
+                        item.level    = cand.level;
+                        cand.overlayIds.push(item.id);
+                        break;
                     }
 
                 } else if (item.level > 1) {
@@ -1127,7 +1193,11 @@
                     for (let j = i - 1; j >= 0; j--) {
                         if (!items[j].isBenefit && items[j].level === item.level - 1) {
                             item.parentId = items[j].id;
-                            items[j].childIds.push(item.id);
+                            if (item.isPoint) {
+                                items[j].overlayIds.push(item.id);
+                            } else {
+                                items[j].childIds.push(item.id);
+                            }
                             break;
                         }
                     }
@@ -1216,7 +1286,31 @@
                 return false;
             }
 
+            // Date-range filter: an item is shown if its date range
+            // overlaps the [dateStart, dateEnd] window (either side may
+            // be unbounded). Items without start/end dates are not
+            // affected by the date filter.
+            if (state.dateStart && item.end   && item.end   < state.dateStart) return false;
+            if (state.dateEnd   && item.start && item.start > state.dateEnd)   return false;
+
             return true;
+        }
+
+
+        // "2026-05" -> Date(2026, 4, 1)  (first of month)
+        function parseMonthInput(value) {
+            if (!value) return null;
+            const m = /^(\d{4})-(\d{2})$/.exec(String(value).trim());
+            if (!m) return null;
+            return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
+        }
+
+
+        // An item is rendered as an overlay on its parent's bar (rather
+        // than getting its own row) if it's a benefit (level = b) or a
+        // single-point child (start == end) of a numbered parent.
+        function isOverlay(item) {
+            return item.isBenefit || (item.parentId && item.isPoint);
         }
 
 
@@ -1226,8 +1320,8 @@
 
             function pushWithChildren(item) {
 
-                if (item.isBenefit)         return;   // rendered in parent's row
-                if (!passesFilters(item))   return;
+                if (isOverlay(item))      return;   // drawn on parent's bar
+                if (!passesFilters(item)) return;
 
                 out.push(item);
 
@@ -1246,8 +1340,8 @@
         }
 
 
-        function visibleBenefitsFor(item) {
-            return item.benefitIds
+        function visibleOverlaysFor(item) {
+            return item.overlayIds
                 .map(id => state.byId[id])
                 .filter(b => passesFilters(b));
         }
@@ -1261,6 +1355,38 @@
                 return 'unknown';
             }
             return item.type;
+        }
+
+
+        // Shape selection: benefits (level = b OR type = benefit) are
+        // drawn as stars, everything else as diamonds.
+        function isBenefitItem(item) {
+            return item.isBenefit || item.type === 'benefit';
+        }
+
+        function diamondPoints(cx, cy, half) {
+            return `${cx},${cy - half} ${cx + half},${cy} `
+                 + `${cx},${cy + half} ${cx - half},${cy}`;
+        }
+
+        function starPoints(cx, cy, outer, inner) {
+            const n      = 5;
+            const start  = -Math.PI / 2;          // first outer point at the top
+            const out    = [];
+            for (let i = 0; i < n * 2; i++) {
+                const r = (i % 2 === 0) ? outer : inner;
+                const a = start + i * Math.PI / n;
+                out.push((cx + r * Math.cos(a)).toFixed(2)
+                       + ',' + (cy + r * Math.sin(a)).toFixed(2));
+            }
+            return out.join(' ');
+        }
+
+        function pointShapePoints(item, cx, cy, half) {
+            if (isBenefitItem(item)) {
+                return starPoints(cx, cy, half * 1.15, half * 0.5);
+            }
+            return diamondPoints(cx, cy, half);
         }
 
 
@@ -1300,19 +1426,40 @@
 
             // --- Date range ---
 
-            let minDate = null, maxDate = null;
-
+            // Data extent across items that survive the current filters
+            // (so an active date filter shrinks the axis to its window).
+            let dataMin = null, dataMax = null;
             for (const it of state.items) {
-                if (it.start && (!minDate || it.start < minDate)) minDate = it.start;
-                if (it.end   && (!maxDate || it.end   > maxDate)) maxDate = it.end;
+                if (!passesFilters(it)) continue;
+                if (it.start && (!dataMin || it.start < dataMin)) dataMin = it.start;
+                if (it.end   && (!dataMax || it.end   > dataMax)) dataMax = it.end;
             }
 
-            if (!minDate || !maxDate) {
+            // Axis bounds. The filter dates take precedence; the
+            // natural extent (with one month of padding on each side
+            // and one extra past the end so the last month has room
+            // for its block to extend to) is used wherever the filter
+            // is unset.
+            let minDate = state.dateStart;
+            let maxDate = state.dateEnd
+                ? new Date(state.dateEnd.getFullYear(), state.dateEnd.getMonth() + 1, 1)
+                : null;
+
+            if (!minDate && dataMin) {
+                minDate = new Date(dataMin.getFullYear(), dataMin.getMonth() - 1, 1);
+            }
+            if (!maxDate && dataMax) {
+                maxDate = new Date(dataMax.getFullYear(), dataMax.getMonth() + 2, 1);
+            }
+
+            if (!minDate || !maxDate || minDate >= maxDate) {
                 const msg = svgEl('text', {
                     x: 24, y: 40,
                     fill: '#a8b5d1', 'font-size': 14,
                 });
-                msg.textContent = 'No usable dates found - check the start/end columns.';
+                msg.textContent = state.dateStart || state.dateEnd
+                    ? 'No items match the current date-range filter.'
+                    : 'No usable dates found - check the start/end columns.';
                 bodySvg.appendChild(msg);
                 bodySvg.setAttribute('width',  600);
                 bodySvg.setAttribute('height', 80);
@@ -1320,12 +1467,21 @@
                 return;
             }
 
-            // Pad by 1 month each side and 1 extra past the end so the
-            // last month's block has somewhere to extend to.
-            minDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, 1);
-            maxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 2, 1);
-
             const totalMonths = monthsBetween(minDate, maxDate);
+
+            // The last month visible on the axis (used to clip bars
+            // that extend beyond the chart).
+            const lastVisibleMonth = new Date(
+                maxDate.getFullYear(),
+                maxDate.getMonth() - 1,
+                1,
+            );
+
+            function clampDate(d) {
+                if (d < minDate)          return minDate;
+                if (d > lastVisibleMonth) return lastVisibleMonth;
+                return d;
+            }
 
 
             // --- Horizontal sizing ---
@@ -1355,11 +1511,11 @@
 
             const visible = visibleItems();
 
-            // Pre-compute which benefits are visible for each row so the
+            // Pre-compute which overlays are visible for each row so the
             // sizing and layout passes agree on what's drawn.
-            const visibleBenefits = {};
+            const visibleOverlays = {};
             for (const it of visible) {
-                visibleBenefits[it.id] = visibleBenefitsFor(it);
+                visibleOverlays[it.id] = visibleOverlaysFor(it);
             }
 
             // Natural (un-scaled) body height needed for everything.
@@ -1375,7 +1531,7 @@
                 + themeRunCount * LAYOUT.themeHeaderHeight
                 + visible.reduce((s, it) => {
                     let h = LAYOUT.rowHeight[it.level];
-                    if (visibleBenefits[it.id].length > 0) {
+                    if (visibleOverlays[it.id].length > 0) {
                         h += LAYOUT.benefitZoneHeight[it.level];
                     }
                     return s + h;
@@ -1439,7 +1595,7 @@
                 }
 
                 const barZ = sized.rowHeight[it.level];
-                const benZ = visibleBenefits[it.id].length > 0
+                const benZ = visibleOverlays[it.id].length > 0
                     ? sized.benefitZoneHeight[it.level]
                     : 0;
 
@@ -1610,7 +1766,7 @@
                 const isExp     = state.expanded.has(it.id);
                 const expand    = it.childIds.length > 0 && it.level < 3;
                 const fs        = sized.fontSize[it.level];
-                const benefits  = visibleBenefits[it.id];
+                const overlays  = visibleOverlays[it.id];
 
                 const rowG = svgEl('g', {
                     class: 'row'
@@ -1699,16 +1855,22 @@
                         const s  = barH / 1.6;
 
                         rowG.appendChild(svgEl('polygon', {
-                            class: 'marker diamond',
+                            class: 'marker',
                             'data-id':     it.id,
                             'data-colour': colourKey(it),
-                            points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                            points: pointShapePoints(it, cx, cy, s),
                         }));
 
                     } else {
 
-                        const x0 = xForMonthStart(it.start);
-                        const x1 = xForMonthEnd(it.end);
+                        // Clamp the displayed range to the visible
+                        // axis so an active date filter just truncates
+                        // bars at the chart edge instead of letting
+                        // them overflow.
+                        const drawStart = clampDate(it.start);
+                        const drawEnd   = clampDate(it.end);
+                        const x0        = xForMonthStart(drawStart);
+                        const x1        = xForMonthEnd(drawEnd);
 
                         rowG.appendChild(svgEl('rect', {
                             class: 'bar',
@@ -1720,71 +1882,75 @@
                             rx: 3, ry: 3,
                         }));
 
-                        // Type-benefit numbered rows also get a diamond
-                        // at the right edge of the block to mark where
-                        // the benefit is delivered.
-                        if (it.type === 'benefit') {
+                        // Type-benefit numbered rows also get an
+                        // end-marker (a star) at the right edge of the
+                        // block - but only if the real end falls
+                        // within the visible window.
+                        if (it.type === 'benefit' && it.end <= lastVisibleMonth) {
                             const cx = x1;
                             const cy = barY + barH / 2;
                             const s  = barH / 1.5;
                             rowG.appendChild(svgEl('polygon', {
-                                class: 'marker end-diamond',
+                                class: 'marker end-marker',
                                 'data-id':     it.id,
                                 'data-colour': colourKey(it),
-                                points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                                points: pointShapePoints(it, cx, cy, s),
                             }));
                         }
                     }
                 }
 
 
-                // Benefit children (b-level rows) plotted in this row.
-                if (benefits.length > 0) {
+                // Overlay markers (benefits + single-point children)
+                // sit on top of the parent's gantt bar at the same
+                // vertical centre, with a small wrapped caption below
+                // the bar inside the overlay (caption) zone.
+                if (overlays.length > 0) {
+
+                    const barH     = sized.barHeight[it.level];
+                    const barCy    = (barZone - barH) / 2 + barH / 2;   // == barZone / 2
 
                     const benZoneY = barZone;
                     const benH     = sized.benefitZoneHeight[it.level];
-                    const diaSize  = sized.benefitDiamondSize[it.level];
+                    const ovSize   = sized.benefitDiamondSize[it.level];
                     const benFs    = sized.benefitFontSize[it.level];
-                    const diaCy    = benZoneY + diaSize / 2 + 3;
-                    const lblY     = diaCy + diaSize / 2 + 2;
-                    const lblH     = Math.max(8, benH - (lblY - benZoneY) - 2);
+
+                    const lblY     = benZoneY + 2;
+                    const lblH     = Math.max(8, benH - 4);
                     const lblW     = Math.max(monthWidth * 1.4, 70);
 
-                    for (const b of benefits) {
+                    for (const ov of overlays) {
 
-                        if (!b.start) continue;
+                        if (!ov.start) continue;
 
-                        const cx = xForMonthStart(b.start) + monthWidth / 2;
+                        const cx = xForMonthStart(ov.start) + monthWidth / 2;
 
                         rowG.appendChild(svgEl('polygon', {
-                            class: 'benefit-marker',
-                            'data-id':     b.id,
-                            'data-colour': colourKey(b),
-                            points: `${cx},${diaCy - diaSize} `
-                                  + `${cx + diaSize},${diaCy} `
-                                  + `${cx},${diaCy + diaSize} `
-                                  + `${cx - diaSize},${diaCy}`,
+                            class: 'overlay-marker',
+                            'data-id':     ov.id,
+                            'data-colour': colourKey(ov),
+                            points: pointShapePoints(ov, cx, barCy, ovSize),
                         }));
 
-                        // data-id on the foreignObject so hover/click on
-                        // the label resolves to this benefit, not the
-                        // parent row underneath it.
-                        const bfo = svgEl('foreignObject', {
-                            'data-id': b.id,
+                        // data-id on the foreignObject so hover/click
+                        // on the label resolves to this overlay item,
+                        // not the host row underneath it.
+                        const ofo = svgEl('foreignObject', {
+                            'data-id': ov.id,
                             x: cx - lblW / 2,
                             y: lblY,
                             width:  lblW,
                             height: lblH,
                         });
 
-                        const blbl = document.createElementNS(XHTML_NS, 'div');
-                        blbl.setAttribute('class', 'benefit-label');
-                        blbl.style.fontSize    = benFs + 'px';
-                        blbl.style.lineHeight  = '1.15';
-                        blbl.textContent       = b.title;
+                        const olbl = document.createElementNS(XHTML_NS, 'div');
+                        olbl.setAttribute('class', 'overlay-label');
+                        olbl.style.fontSize    = benFs + 'px';
+                        olbl.style.lineHeight  = '1.15';
+                        olbl.textContent       = ov.title;
 
-                        bfo.appendChild(blbl);
-                        rowG.appendChild(bfo);
+                        ofo.appendChild(olbl);
+                        rowG.appendChild(ofo);
                     }
                 }
             }
@@ -1857,15 +2023,35 @@
         });
 
 
+        document.getElementById('date-start').addEventListener('change', (e) => {
+            state.dateStart = parseMonthInput(e.target.value);
+            render();
+        });
+
+        document.getElementById('date-end').addEventListener('change', (e) => {
+            state.dateEnd = parseMonthInput(e.target.value);
+            render();
+        });
+
+        document.getElementById('date-clear').addEventListener('click', (e) => {
+            e.preventDefault();
+            state.dateStart = null;
+            state.dateEnd   = null;
+            document.getElementById('date-start').value = '';
+            document.getElementById('date-end').value   = '';
+            render();
+        });
+
+
         document.getElementById('body-chart').addEventListener('click', (e) => {
 
-            // If a benefit element was clicked, do nothing - benefits
-            // aren't expandable, and we don't want a misclick to expand
-            // the host row.
+            // Overlay items (benefits + point-children) aren't
+            // expandable; a click on one should just leave the tooltip
+            // showing and not toggle the host row.
             const hit = e.target.closest('[data-id]');
             if (hit) {
                 const hitItem = state.byId[hit.dataset.id];
-                if (hitItem && hitItem.isBenefit) return;
+                if (hitItem && isOverlay(hitItem)) return;
             }
 
             const rowG = e.target.closest('.row.expandable');
@@ -1914,7 +2100,9 @@
                 ? formatMonthYear(item.start)
                 : (formatMonthYear(item.start) + '  -  ' + formatMonthYear(item.end));
 
-            const levelText = item.isBenefit ? 'benefit' : ('level ' + item.level);
+            const levelText = item.isBenefit
+                ? 'benefit'
+                : ('level ' + item.level + (item.isPoint && item.parentId ? ' (point)' : ''));
             const confText  = item.confidence
                 ? ({ h: 'high', m: 'medium', l: 'low' })[item.confidence] + ' confidence'
                 : null;
