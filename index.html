@@ -141,15 +141,30 @@
         }
 
 
-        /* ---- Toolbar ---- */
+        /* ---- Toolbar (fixed at top of viewport when the chart is shown) ---- */
+
+        /*
+         * The toolbar is fixed so it stays at the top of the viewport
+         * during both vertical and horizontal scrolling. Body gets a
+         * matching padding-top via the .chart-visible class so the
+         * fixed toolbar doesn't cover the chart's first row.
+         */
+        body.chart-visible { padding-top: 48px; }
 
         #toolbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
             display: flex;
             align-items: center;
             padding: 12px 20px;
             background: var(--bg-deep);
             border-bottom: 1px solid var(--border);
             gap: 28px;
+            height: 48px;
+            box-sizing: border-box;
         }
 
         #toolbar .brand {
@@ -182,26 +197,46 @@
         .swatch.product   { background: var(--product);   }
         .swatch.milestone { background: var(--milestone); }
 
-        #reload-link {
+        .toolbar-links {
             margin-left: auto;
+            display: flex;
+            gap: 18px;
+        }
+
+        .toolbar-links a {
             color: var(--fg-muted);
             font-size: 13px;
             text-decoration: none;
         }
 
-        #reload-link:hover { color: var(--fg); text-decoration: underline; }
+        .toolbar-links a:hover { color: var(--fg); text-decoration: underline; }
 
 
         /* ---- Chart container ---- */
 
+        /*
+         * No overflow on chart-wrap - we let the body element handle
+         * horizontal scrolling so that position: sticky on the axis
+         * works relative to the viewport (it sticks vertically) while
+         * still scrolling horizontally with the body content.
+         */
         #chart-wrap {
-            padding: 16px 16px 40px;
-            overflow-x: auto;
+            padding: 12px 16px 40px;
+            width: max-content;
+            min-width: 100%;
+            box-sizing: border-box;
         }
 
-        #chart {
+        #axis-chart {
             display: block;
-            background: transparent;
+            position: sticky;
+            top: 48px;                  /* matches toolbar height */
+            z-index: 50;
+            background: var(--bg);
+        }
+
+        #body-chart {
+            display: block;
         }
 
 
@@ -238,13 +273,29 @@
         .row-bg           { fill: transparent; transition: fill 120ms ease; }
         .row.expandable:hover .row-bg { fill: rgba(255, 255, 255, 0.05); }
 
+        /*
+         * Row labels are HTML <div>s inside <foreignObject> so they
+         * can wrap and ellipsis-truncate naturally. The font size is
+         * set inline per row (scales with the chart's auto-fit).
+         */
         .row-label {
-            fill: var(--fg);
-            transition: fill 120ms ease;
+            color: var(--fg);
+            transition: color 120ms ease;
+            font-family: inherit;
+            line-height: 1.18;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
             pointer-events: none;
+            user-select: none;
+            word-break: normal;
+            overflow-wrap: anywhere;
         }
 
-        .row.expandable:hover .row-label { fill: #ffffff; }
+        .row.expandable:hover .row-label { color: #ffffff; }
 
         .expand-icon {
             fill: var(--fg-muted);
@@ -466,6 +517,17 @@
         <label for="topleft-input">Top-left cell of the data table</label>
         <input id="topleft-input" type="text" value="A1" spellcheck="false">
 
+        <label for="skip-header-input">Extra header rows to skip below the header</label>
+        <input id="skip-header-input" type="number" min="0" step="1" value="0">
+
+        <div class="hint">
+            "Top-left cell" should point at the row containing the
+            column names. If your sheet has additional header rows
+            below that (sub-headers, column descriptions, etc.) set
+            the "extra header rows" count so those rows are skipped
+            before the data begins.
+        </div>
+
         <button id="load-btn">Load</button>
 
     </div>
@@ -498,7 +560,10 @@
             </label>
         </div>
 
-        <a href="#" id="reload-link">Reload file</a>
+        <div class="toolbar-links">
+            <a href="#" id="settings-link">Sheet settings</a>
+            <a href="#" id="reload-link">Reload file</a>
+        </div>
 
     </div>
 
@@ -506,10 +571,22 @@
     <!--
         ============================================================
         Chart and tooltip.
+
+        The chart is split into two SVGs so that the date axis can
+        stay visible (position: sticky) while the body scrolls
+        vertically:
+
+          - #axis-chart : just the month/year axis. Sticky-pinned to
+                          the top of the page below the toolbar, but
+                          still scrolls horizontally with the body so
+                          labels stay aligned over the bars.
+          - #body-chart : swimlanes, rows, bars, connectors. Normal
+                          document flow.
         ============================================================
     -->
     <div id="chart-wrap" hidden>
-        <svg id="chart" xmlns="http://www.w3.org/2000/svg"></svg>
+        <svg id="axis-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+        <svg id="body-chart" xmlns="http://www.w3.org/2000/svg"></svg>
     </div>
 
     <div id="tooltip" hidden></div>
@@ -543,26 +620,39 @@
         const LAYOUT = {
 
             // Single column on the left for row titles. Themes get their
-            // own header row stacked above the rows that belong to them,
-            // so they no longer compete for horizontal space.
+            // own header row stacked above the rows that belong to them.
             marginLeft:    500,
             marginRight:   40,
-            marginTop:     70,
-            marginBottom:  20,
             minMonthWidth: 64,
+
+            // The axis lives in its own SVG above the chart body.
+            // axisHeight is the fixed height of that SVG.
+            axisHeight:        70,
+            toolbarHeight:     48,
+
+            bodyMarginTop:      8,
+            bodyMarginBottom:  16,
 
             // Horizontal padding inside the label column.
             labelLeftPad:   16,    // padding from chart edge to triangle
             triangleGap:    18,    // gap between triangle and row label
+            labelRightPad:  16,    // gap between label area and gantt
+            labelIndent:    24,    // indent added per nested level
 
             // Vertical space reserved above each theme's rows for the
-            // theme heading.
+            // theme heading (at scale = 1).
             themeHeaderHeight: 38,
 
-            rowHeight:  { 1: 40, 2: 30, 3: 24 },
+            // Sized to fit two lines of wrapped label text comfortably
+            // at the matching fontSize/lineHeight (1.18).
+            rowHeight:  { 1: 48, 2: 40, 3: 30 },
             barHeight:  { 1: 22, 2: 16, 3: 12 },
             fontSize:   { 1: 17, 2: 14, 3: 11 },
-            labelIndent: 24,
+
+            // Auto-fit floor: the chart will not scale rows below this
+            // fraction of their natural height even if content exceeds
+            // the viewport.
+            minAutoFitScale: 0.6,
         };
 
 
@@ -622,6 +712,46 @@
          * ================================================================
          */
 
+        function openSheetPicker() {
+
+            const select = document.getElementById('sheet-select');
+            select.innerHTML = '';
+
+            for (const name of state.workbook.SheetNames) {
+                const opt = document.createElement('option');
+                opt.value       = name;
+                opt.textContent = name;
+                select.appendChild(opt);
+            }
+
+            document.getElementById('upload-card').hidden  = true;
+            document.getElementById('toolbar').hidden      = true;
+            document.getElementById('chart-wrap').hidden   = true;
+            document.body.classList.remove('chart-visible');
+            document.getElementById('sheet-picker').hidden = false;
+        }
+
+
+        function showUploadCard() {
+
+            // Important: clear the file input value so that re-selecting
+            // the same file still fires a 'change' event (otherwise the
+            // user clicking "Reload file" and re-picking the same file
+            // gets stuck on the upload screen).
+            document.getElementById('excel-file').value    = '';
+
+            state.items    = [];
+            state.byId     = {};
+            state.expanded = new Set();
+
+            document.getElementById('toolbar').hidden      = true;
+            document.getElementById('chart-wrap').hidden   = true;
+            document.getElementById('sheet-picker').hidden = true;
+            document.body.classList.remove('chart-visible');
+            document.getElementById('upload-card').hidden  = false;
+        }
+
+
         document.getElementById('excel-file').addEventListener('change', async (e) => {
 
             const file = e.target.files[0];
@@ -635,18 +765,7 @@
                     cellDates:  true,
                 });
 
-                const select = document.getElementById('sheet-select');
-                select.innerHTML = '';
-
-                for (const name of state.workbook.SheetNames) {
-                    const opt = document.createElement('option');
-                    opt.value       = name;
-                    opt.textContent = name;
-                    select.appendChild(opt);
-                }
-
-                document.getElementById('upload-card').hidden  = true;
-                document.getElementById('sheet-picker').hidden = false;
+                openSheetPicker();
 
             } catch (err) {
                 alert('Could not read workbook: ' + err.message);
@@ -658,10 +777,12 @@
 
             const sheetName = document.getElementById('sheet-select').value;
             const topLeft   = (document.getElementById('topleft-input').value || 'A1').trim();
+            const skipRaw   = document.getElementById('skip-header-input').value;
+            const skipRows  = Math.max(0, parseInt(skipRaw, 10) || 0);
             const sheet     = state.workbook.Sheets[sheetName];
 
             try {
-                loadData(sheet, topLeft);
+                loadData(sheet, topLeft, skipRows);
             } catch (err) {
                 alert('Could not load data: ' + err.message);
                 return;
@@ -670,24 +791,22 @@
             document.getElementById('sheet-picker').hidden = true;
             document.getElementById('toolbar').hidden      = false;
             document.getElementById('chart-wrap').hidden   = false;
+            document.body.classList.add('chart-visible');
 
             render();
         });
 
 
-        document.getElementById('reload-link').addEventListener('click', (e) => {
-
+        document.getElementById('settings-link').addEventListener('click', (e) => {
             e.preventDefault();
+            if (!state.workbook) return;
+            openSheetPicker();
+        });
 
-            state.items    = [];
-            state.byId     = {};
-            state.expanded = new Set();
 
-            document.getElementById('chart').innerHTML     = '';
-            document.getElementById('toolbar').hidden      = true;
-            document.getElementById('chart-wrap').hidden   = true;
-            document.getElementById('sheet-picker').hidden = true;
-            document.getElementById('upload-card').hidden  = false;
+        document.getElementById('reload-link').addEventListener('click', (e) => {
+            e.preventDefault();
+            showUploadCard();
         });
 
 
@@ -728,11 +847,13 @@
         const KNOWN_TYPES = ['benefit', 'product', 'milestone'];
 
 
-        function loadData(sheet, topLeftRef) {
+        function loadData(sheet, topLeftRef, skipHeaderRows) {
 
             if (!sheet || !sheet['!ref']) {
                 throw new Error('Sheet is empty.');
             }
+
+            skipHeaderRows = Math.max(0, skipHeaderRows | 0);
 
             const topLeft = parseCellRef(topLeftRef);
 
@@ -757,11 +878,14 @@
                 raw:    true,
             });
 
-            if (rows.length < 2) {
+            // Need at least: 1 header + skipHeaderRows extras + 1 data row.
+            if (rows.length < 2 + skipHeaderRows) {
                 throw new Error('No data rows found below the header.');
             }
 
             const headerRow = rows[0].map(v => v == null ? '' : String(v).trim().toLowerCase());
+
+            const firstDataRow = 1 + skipHeaderRows;
 
             const columnIndex = {};
             for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
@@ -778,7 +902,7 @@
 
             const items = [];
 
-            for (let i = 1; i < rows.length; i++) {
+            for (let i = firstDataRow; i < rows.length; i++) {
 
                 const row   = rows[i];
                 const title = row[columnIndex.title];
@@ -943,26 +1067,16 @@
         }
 
 
+        const XHTML_NS = 'http://www.w3.org/1999/xhtml';
+
+
         function render() {
 
-            const svg = document.getElementById('chart');
-            svg.innerHTML = '';
+            const axisSvg = document.getElementById('axis-chart');
+            const bodySvg = document.getElementById('body-chart');
 
-
-            // --- Defs (filters) ---
-
-            const defs = svgEl('defs');
-            const filter = svgEl('filter', {
-                id: 'hover-glow',
-                x: '-20%', y: '-50%', width: '140%', height: '200%',
-            });
-            filter.appendChild(svgEl('feDropShadow', {
-                dx: 0, dy: 2, stdDeviation: 3,
-                'flood-color': '#000', 'flood-opacity': 0.55,
-            }));
-            defs.appendChild(filter);
-            svg.appendChild(defs);
-
+            axisSvg.innerHTML = '';
+            bodySvg.innerHTML = '';
 
             if (state.items.length === 0) return;
 
@@ -977,20 +1091,19 @@
             }
 
             if (!minDate || !maxDate) {
-                // No usable dates - bail out with a message.
                 const msg = svgEl('text', {
                     x: 24, y: 40,
                     fill: '#a8b5d1', 'font-size': 14,
                 });
                 msg.textContent = 'No usable dates found - check the start/end columns.';
-                svg.appendChild(msg);
-                svg.setAttribute('width',  600);
-                svg.setAttribute('height', 80);
-                svg.setAttribute('viewBox', '0 0 600 80');
+                bodySvg.appendChild(msg);
+                bodySvg.setAttribute('width',  600);
+                bodySvg.setAttribute('height', 80);
+                bodySvg.setAttribute('viewBox', '0 0 600 80');
                 return;
             }
 
-            // Pad by 1 month on each side, plus 1 extra at the end so the
+            // Pad by 1 month each side and 1 extra past the end so the
             // last month's block has somewhere to extend to.
             minDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, 1);
             maxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 2, 1);
@@ -998,9 +1111,12 @@
             const totalMonths = monthsBetween(minDate, maxDate);
 
 
-            // --- Sizing ---
+            // --- Horizontal sizing ---
 
-            const containerWidth = document.getElementById('chart-wrap').clientWidth - 32;
+            // The body element handles horizontal scrolling, so we fit
+            // the chart to viewport width as a baseline and let the
+            // minMonthWidth force it wider (with scrollbar) if needed.
+            const containerWidth = window.innerWidth - 32;
 
             const usableWidthMin  = LAYOUT.minMonthWidth * totalMonths;
             const usableWidthFit  = containerWidth - LAYOUT.marginLeft - LAYOUT.marginRight;
@@ -1018,20 +1134,62 @@
             }
 
 
-            // --- Visible rows & vertical layout ---
+            // --- Auto-fit scaling for vertical sizes ---
 
             const visible = visibleItems();
 
+            // Natural (un-scaled) body height needed for everything.
+            let themeRunCount = 0;
+            {
+                let last = null;
+                for (const it of visible) {
+                    if (it.theme !== last) { themeRunCount++; last = it.theme; }
+                }
+            }
 
-            // Vertical layout - groups visible items by contiguous theme
-            // runs and inserts a header gap before each group so the
-            // theme heading has its own space.
+            const naturalBody = LAYOUT.bodyMarginTop
+                + themeRunCount * LAYOUT.themeHeaderHeight
+                + visible.reduce((s, it) => s + LAYOUT.rowHeight[it.level], 0)
+                + LAYOUT.bodyMarginBottom;
+
+            const availableBody = window.innerHeight
+                - LAYOUT.toolbarHeight
+                - LAYOUT.axisHeight
+                - 24;   // small breathing room
+
+            let scale = 1;
+            if (naturalBody > availableBody && availableBody > 0) {
+                scale = Math.max(LAYOUT.minAutoFitScale, availableBody / naturalBody);
+            }
+
+            const sized = {
+                rowHeight: {
+                    1: LAYOUT.rowHeight[1] * scale,
+                    2: LAYOUT.rowHeight[2] * scale,
+                    3: LAYOUT.rowHeight[3] * scale,
+                },
+                barHeight: {
+                    1: LAYOUT.barHeight[1] * scale,
+                    2: LAYOUT.barHeight[2] * scale,
+                    3: LAYOUT.barHeight[3] * scale,
+                },
+                fontSize: {
+                    1: LAYOUT.fontSize[1] * scale,
+                    2: LAYOUT.fontSize[2] * scale,
+                    3: LAYOUT.fontSize[3] * scale,
+                },
+                themeHeaderHeight: LAYOUT.themeHeaderHeight * scale,
+                themeFontSize:     15 * Math.max(scale, 0.75),
+            };
+
+
+            // --- Vertical layout (in body-SVG coords; axis is separate) ---
 
             const rowY       = {};
             const themeBands = [];        // [{ theme, headerY, yTop, yBot }]
 
-            let y            = LAYOUT.marginTop;
-            let currentBand  = null;
+            let y           = LAYOUT.bodyMarginTop;
+            let currentBand = null;
 
             for (const it of visible) {
 
@@ -1047,26 +1205,106 @@
                     };
                     themeBands.push(currentBand);
 
-                    y += LAYOUT.themeHeaderHeight;
+                    y += sized.themeHeaderHeight;
                 }
 
                 rowY[it.id] = y;
-                y += LAYOUT.rowHeight[it.level];
+                y += sized.rowHeight[it.level];
             }
-
             if (currentBand) currentBand.yBot = y;
 
-            const chartHeight = Math.max(y + LAYOUT.marginBottom, LAYOUT.marginTop + 80);
-
-            svg.setAttribute('width',   chartWidth);
-            svg.setAttribute('height',  chartHeight);
-            svg.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`);
+            const bodyHeight = Math.max(y + LAYOUT.bodyMarginBottom, 120);
 
 
-            // --- Theme bands: shaded background plus a heading row ---
+            // ============================================================
+            // Axis SVG
+            // ============================================================
+
+            axisSvg.setAttribute('width',  chartWidth);
+            axisSvg.setAttribute('height', LAYOUT.axisHeight);
+            axisSvg.setAttribute('viewBox', `0 0 ${chartWidth} ${LAYOUT.axisHeight}`);
+
+            // Solid backing rect so content scrolling underneath
+            // is hidden by the sticky axis.
+            axisSvg.appendChild(svgEl('rect', {
+                x: 0, y: 0, width: chartWidth, height: LAYOUT.axisHeight,
+                fill: 'var(--bg)',
+            }));
+
+            const axisLineY = LAYOUT.axisHeight - 6;
+
+            axisSvg.appendChild(svgEl('line', {
+                class: 'axis-line',
+                x1: LAYOUT.marginLeft,
+                x2: chartWidth - LAYOUT.marginRight,
+                y1: axisLineY, y2: axisLineY,
+            }));
+
+            {
+                let cur = new Date(minDate);
+                for (let mi = 0; mi < totalMonths; mi++) {
+
+                    const xx      = xForMonthStart(cur);
+                    const isJan   = cur.getMonth() === 0;
+                    const isStart = mi === 0;
+
+                    // Short tick mark above the axis line.
+                    axisSvg.appendChild(svgEl('line', {
+                        class: 'tick-line' + (isJan ? ' major' : ''),
+                        x1: xx, x2: xx,
+                        y1: axisLineY - 4, y2: axisLineY,
+                    }));
+
+                    const monthLbl = svgEl('text', {
+                        class: 'tick-month',
+                        x: xx + monthWidth / 2,
+                        y: axisLineY - 8,
+                        'text-anchor': 'middle',
+                    });
+                    monthLbl.textContent = cur.toLocaleString('en', { month: 'short' });
+                    axisSvg.appendChild(monthLbl);
+
+                    if (isJan || isStart) {
+                        const yearLbl = svgEl('text', {
+                            class: 'tick-year',
+                            x: xx + 6,
+                            y: axisLineY - 30,
+                        });
+                        yearLbl.textContent = cur.getFullYear();
+                        axisSvg.appendChild(yearLbl);
+                    }
+
+                    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+                }
+            }
+
+
+            // ============================================================
+            // Body SVG
+            // ============================================================
+
+            bodySvg.setAttribute('width',  chartWidth);
+            bodySvg.setAttribute('height', bodyHeight);
+            bodySvg.setAttribute('viewBox', `0 0 ${chartWidth} ${bodyHeight}`);
+
+            // Defs: drop-shadow filter for hover.
+            const defs = svgEl('defs');
+            const glow = svgEl('filter', {
+                id: 'hover-glow',
+                x: '-20%', y: '-50%', width: '140%', height: '200%',
+            });
+            glow.appendChild(svgEl('feDropShadow', {
+                dx: 0, dy: 2, stdDeviation: 3,
+                'flood-color': '#000', 'flood-opacity': 0.55,
+            }));
+            defs.appendChild(glow);
+            bodySvg.appendChild(defs);
+
+
+            // --- Theme bands ---
 
             const swimG = svgEl('g', { id: 'swimlanes' });
-            svg.appendChild(swimG);
+            bodySvg.appendChild(swimG);
 
             themeBands.forEach((band, bandIndex) => {
 
@@ -1074,7 +1312,6 @@
                     ? 'rgba(255, 255, 255, 0.03)'
                     : 'rgba(255, 255, 255, 0.07)';
 
-                // Shaded band spans the heading and the rows together.
                 swimG.appendChild(svgEl('rect', {
                     class: 'swimlane',
                     x: 0, y: band.yTop,
@@ -1083,87 +1320,58 @@
                     fill: fill,
                 }));
 
-                // Top border to visually separate the band.
                 swimG.appendChild(svgEl('line', {
                     class: 'theme-divider',
                     x1: 0,                  x2: chartWidth,
                     y1: band.yTop + 0.5,    y2: band.yTop + 0.5,
                 }));
 
-                // Theme heading, centred vertically in the header area.
                 const lbl = svgEl('text', {
                     class: 'theme-label',
                     x: LAYOUT.labelLeftPad,
-                    y: band.headerY + LAYOUT.themeHeaderHeight / 2 + 5,
+                    y: band.headerY + sized.themeHeaderHeight / 2 + 5,
+                    'font-size': sized.themeFontSize,
                 });
                 lbl.textContent = band.theme;
                 swimG.appendChild(lbl);
             });
 
 
-            // --- Time axis ---
+            // --- Full-height vertical grid lines aligned with the axis ---
 
-            const axisG = svgEl('g', { id: 'time-axis' });
-            svg.appendChild(axisG);
+            const gridG = svgEl('g', { id: 'grid' });
+            bodySvg.appendChild(gridG);
 
-            axisG.appendChild(svgEl('line', {
-                class: 'axis-line',
-                x1: LAYOUT.marginLeft,
-                x2: chartWidth - LAYOUT.marginRight,
-                y1: LAYOUT.marginTop - 6,
-                y2: LAYOUT.marginTop - 6,
-            }));
-
-            let cur = new Date(minDate);
-
-            for (let mi = 0; mi < totalMonths; mi++) {
-
-                const xx     = xForMonthStart(cur);
-                const isJan  = cur.getMonth() === 0;
-                const isStart = mi === 0;
-
-                axisG.appendChild(svgEl('line', {
-                    class: 'tick-line' + (isJan ? ' major' : ''),
-                    x1: xx, x2: xx,
-                    y1: LAYOUT.marginTop - 6,
-                    y2: chartHeight - LAYOUT.marginBottom,
-                }));
-
-                const monthLbl = svgEl('text', {
-                    class: 'tick-month',
-                    x: xx + monthWidth / 2,
-                    y: LAYOUT.marginTop - 14,
-                    'text-anchor': 'middle',
-                });
-                monthLbl.textContent = cur.toLocaleString('en', { month: 'short' });
-                axisG.appendChild(monthLbl);
-
-                if (isJan || isStart) {
-                    const yearLbl = svgEl('text', {
-                        class: 'tick-year',
-                        x: xx + 6,
-                        y: LAYOUT.marginTop - 36,
-                    });
-                    yearLbl.textContent = cur.getFullYear();
-                    axisG.appendChild(yearLbl);
+            {
+                let cur = new Date(minDate);
+                for (let mi = 0; mi < totalMonths; mi++) {
+                    const xx    = xForMonthStart(cur);
+                    const isJan = cur.getMonth() === 0;
+                    gridG.appendChild(svgEl('line', {
+                        class: 'tick-line' + (isJan ? ' major' : ''),
+                        x1: xx, x2: xx,
+                        y1: 0,  y2: bodyHeight,
+                    }));
+                    cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
                 }
-
-                cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
             }
 
 
             // --- Rows ---
 
             const rowsG = svgEl('g', { id: 'rows' });
-            svg.appendChild(rowsG);
+            bodySvg.appendChild(rowsG);
+
+            const labelAreaEnd = LAYOUT.marginLeft - LAYOUT.labelRightPad;
 
             for (const it of visible) {
 
                 const ry      = rowY[it.id];
-                const rh      = LAYOUT.rowHeight[it.level];
+                const rh      = sized.rowHeight[it.level];
                 const indent  = (it.level - 1) * LAYOUT.labelIndent;
                 const isExp   = state.expanded.has(it.id);
                 const expand  = it.childIds.length > 0 && it.level < 3;
+                const fs      = sized.fontSize[it.level];
 
                 const rowG = svgEl('g', {
                     class: 'row'
@@ -1194,30 +1402,52 @@
                     const tri = svgEl('text', {
                         class: 'expand-icon',
                         x: triX,
-                        y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
-                        'font-size': LAYOUT.fontSize[it.level],
+                        y: rh / 2 + fs / 3,
+                        'font-size': fs,
                     });
                     tri.textContent = isExp ? '▾' : '▸';
                     rowG.appendChild(tri);
                 }
 
 
-                // Title label.
-                const lbl = svgEl('text', {
-                    class: 'row-label',
+                // Title label - HTML inside foreignObject so it wraps
+                // and ellipsis-truncates naturally. Vertically centred
+                // via the flex wrapper.
+                const labelWidth = Math.max(20, labelAreaEnd - labelX);
+
+                const fo = svgEl('foreignObject', {
                     x: labelX,
-                    y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
-                    'font-size': LAYOUT.fontSize[it.level],
+                    y: 1,
+                    width:  labelWidth,
+                    height: rh - 2,
                 });
-                lbl.textContent = it.title;
-                rowG.appendChild(lbl);
+
+                const center = document.createElementNS(XHTML_NS, 'div');
+                center.style.display       = 'flex';
+                center.style.alignItems    = 'center';
+                center.style.height        = '100%';
+
+                const lineHeight    = 1.18;
+                const maxLines      = Math.max(1, Math.floor((rh - 4) / (fs * lineHeight)));
+
+                const label = document.createElementNS(XHTML_NS, 'div');
+                label.setAttribute('class', 'row-label');
+                label.style.fontSize          = fs + 'px';
+                label.style.lineHeight        = String(lineHeight);
+                label.style.webkitLineClamp   = String(maxLines);
+                label.style.lineClamp         = String(maxLines);
+                label.textContent             = it.title;
+
+                center.appendChild(label);
+                fo.appendChild(center);
+                rowG.appendChild(fo);
 
 
                 // Bar or marker.
                 if (it.start && it.end) {
 
                     const isPoint = it.start.getTime() === it.end.getTime();
-                    const barH    = LAYOUT.barHeight[it.level];
+                    const barH    = sized.barHeight[it.level];
                     const barY    = (rh - barH) / 2;
 
                     if (isPoint) {
@@ -1253,7 +1483,7 @@
             // --- Connectors (parent -> child) ---
 
             const connG = svgEl('g', { id: 'connectors' });
-            svg.appendChild(connG);
+            bodySvg.appendChild(connG);
 
             for (const it of visible) {
 
@@ -1270,8 +1500,8 @@
                 const parentIndentX = parentTriX + 6;
                 const childIndentX  = childTriX  - 4;
 
-                const startY = rowY[parent.id] + LAYOUT.rowHeight[parent.level];
-                const endY   = rowY[it.id]     + LAYOUT.rowHeight[it.level] / 2;
+                const startY = rowY[parent.id] + sized.rowHeight[parent.level];
+                const endY   = rowY[it.id]     + sized.rowHeight[it.level] / 2;
 
                 connG.appendChild(svgEl('path', {
                     class: 'connector from-expanded',
@@ -1300,7 +1530,7 @@
         });
 
 
-        document.getElementById('chart').addEventListener('click', (e) => {
+        document.getElementById('body-chart').addEventListener('click', (e) => {
 
             const rowG = e.target.closest('.row.expandable');
             if (!rowG) return;
@@ -1325,7 +1555,7 @@
             }[c]));
         }
 
-        document.getElementById('chart').addEventListener('mousemove', (e) => {
+        document.getElementById('body-chart').addEventListener('mousemove', (e) => {
 
             const target = e.target.closest('[data-id]');
 
@@ -1380,7 +1610,7 @@
         });
 
 
-        document.getElementById('chart').addEventListener('mouseleave', () => {
+        document.getElementById('body-chart').addEventListener('mouseleave', () => {
             tooltip.hidden = true;
         });
 
