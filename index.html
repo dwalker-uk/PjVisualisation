@@ -384,11 +384,13 @@
         /* Benefit children (b-level) plotted in the parent's row */
 
         /*
-         * Benefit diamonds sit on top of the parent's gantt bar, so a
-         * light outline keeps them visible even when fill colour
-         * matches the underlying bar.
+         * Overlay markers (benefits + single-point children) sit on
+         * top of the parent's gantt bar. A light outline keeps them
+         * visible even when their fill matches the bar beneath them.
+         * Benefits are drawn as stars, milestones / products as
+         * diamonds.
          */
-        .benefit-marker {
+        .overlay-marker {
             cursor: pointer;
             stroke: rgba(255, 255, 255, 0.9);
             stroke-width: 1.25;
@@ -398,13 +400,13 @@
                 stroke-width 140ms ease;
         }
 
-        .benefit-marker:hover {
+        .overlay-marker:hover {
             filter: brightness(1.18) url(#hover-glow);
             stroke: #ffffff;
             stroke-width: 2;
         }
 
-        .benefit-label {
+        .overlay-label {
             color: var(--fg);
             font-family: inherit;
             text-align: center;
@@ -420,11 +422,10 @@
         }
 
         /*
-         * The end-diamond on a type=benefit numbered row sits at the
-         * right edge of the gantt block. Render it on top of the bar
-         * so its outline is visible.
+         * The end-marker on a type=benefit numbered range row sits at
+         * the right edge of the gantt block.
          */
-        .end-diamond {
+        .end-marker {
             stroke: rgba(255, 255, 255, 0.85);
             stroke-width: 1.25;
         }
@@ -601,10 +602,11 @@
             (benefit / product / milestone), <code>confidence</code>
             (h / m / l - optional).
             <br><br>
-            A level of <code>b</code> marks the row as a benefit
-            associated with the most recent numbered row above it;
-            benefit rows are drawn as a small diamond inside their
-            parent's row at the benefit's start date.
+            Benefits (<code>type = benefit</code> or
+            <code>level = b</code>) are drawn as stars, everything else
+            as diamonds when shown as a point. Any sub-row with
+            <code>start = end</code> overlays its parent's gantt bar
+            instead of taking its own row.
         </div>
 
     </div>
@@ -1086,6 +1088,9 @@
                 else if (conf === 'low')                      conf = 'l';
                 if (!KNOWN_CONFS.includes(conf))              conf = null;
 
+                const isPoint = start != null && end != null
+                             && start.getTime() === end.getTime();
+
                 items.push({
                     id:          'item-' + i,
                     theme:       String(row[columnIndex.theme] || '').trim() || '(unspecified)',
@@ -1095,11 +1100,12 @@
                     end:         end,
                     level:       level,
                     isBenefit:   isBenefit,
+                    isPoint:     isPoint,
                     type:        type,
                     confidence:  conf,
                     parentId:    null,
-                    childIds:    [],         // numbered children (level n -> n+1)
-                    benefitIds:  [],         // b-level children rendered in this row
+                    childIds:    [],         // range children that get their own rows when expanded
+                    overlayIds:  [],         // benefits + point-children rendered on this row's bar
                 });
             }
 
@@ -1108,24 +1114,32 @@
             }
 
             // Parent inference:
-            //   - "b" rows attach to the most recent non-benefit row above
-            //     (regardless of its numbered level), and inherit that
-            //     row's level for grouping purposes.
+            //   - "b" rows attach to the most recent non-benefit row
+            //     above and inherit that row's level for grouping.
             //   - Numbered rows at level > 1 attach to the most recent
-            //     non-benefit row with level (n - 1).
+            //     non-benefit row with level (n - 1):
+            //         * range children (start != end) become normal
+            //           children that expand into their own row
+            //         * point children (start == end) become overlay
+            //           markers on the parent's bar instead, just like
+            //           benefits do
             for (let i = 0; i < items.length; i++) {
 
                 const item = items[i];
 
                 if (item.isBenefit) {
 
+                    // Walk up to the first row that's actually rendered
+                    // as its own row - i.e. not a "b" benefit and not a
+                    // point-with-parent (which is itself an overlay).
                     for (let j = i - 1; j >= 0; j--) {
-                        if (!items[j].isBenefit) {
-                            item.parentId = items[j].id;
-                            item.level    = items[j].level;
-                            items[j].benefitIds.push(item.id);
-                            break;
-                        }
+                        const cand = items[j];
+                        if (cand.isBenefit)                          continue;
+                        if (cand.parentId && cand.isPoint)           continue;
+                        item.parentId = cand.id;
+                        item.level    = cand.level;
+                        cand.overlayIds.push(item.id);
+                        break;
                     }
 
                 } else if (item.level > 1) {
@@ -1133,7 +1147,11 @@
                     for (let j = i - 1; j >= 0; j--) {
                         if (!items[j].isBenefit && items[j].level === item.level - 1) {
                             item.parentId = items[j].id;
-                            items[j].childIds.push(item.id);
+                            if (item.isPoint) {
+                                items[j].overlayIds.push(item.id);
+                            } else {
+                                items[j].childIds.push(item.id);
+                            }
                             break;
                         }
                     }
@@ -1226,14 +1244,22 @@
         }
 
 
+        // An item is rendered as an overlay on its parent's bar (rather
+        // than getting its own row) if it's a benefit (level = b) or a
+        // single-point child (start == end) of a numbered parent.
+        function isOverlay(item) {
+            return item.isBenefit || (item.parentId && item.isPoint);
+        }
+
+
         function visibleItems() {
 
             const out = [];
 
             function pushWithChildren(item) {
 
-                if (item.isBenefit)         return;   // rendered in parent's row
-                if (!passesFilters(item))   return;
+                if (isOverlay(item))      return;   // drawn on parent's bar
+                if (!passesFilters(item)) return;
 
                 out.push(item);
 
@@ -1252,8 +1278,8 @@
         }
 
 
-        function visibleBenefitsFor(item) {
-            return item.benefitIds
+        function visibleOverlaysFor(item) {
+            return item.overlayIds
                 .map(id => state.byId[id])
                 .filter(b => passesFilters(b));
         }
@@ -1267,6 +1293,38 @@
                 return 'unknown';
             }
             return item.type;
+        }
+
+
+        // Shape selection: benefits (level = b OR type = benefit) are
+        // drawn as stars, everything else as diamonds.
+        function isBenefitItem(item) {
+            return item.isBenefit || item.type === 'benefit';
+        }
+
+        function diamondPoints(cx, cy, half) {
+            return `${cx},${cy - half} ${cx + half},${cy} `
+                 + `${cx},${cy + half} ${cx - half},${cy}`;
+        }
+
+        function starPoints(cx, cy, outer, inner) {
+            const n      = 5;
+            const start  = -Math.PI / 2;          // first outer point at the top
+            const out    = [];
+            for (let i = 0; i < n * 2; i++) {
+                const r = (i % 2 === 0) ? outer : inner;
+                const a = start + i * Math.PI / n;
+                out.push((cx + r * Math.cos(a)).toFixed(2)
+                       + ',' + (cy + r * Math.sin(a)).toFixed(2));
+            }
+            return out.join(' ');
+        }
+
+        function pointShapePoints(item, cx, cy, half) {
+            if (isBenefitItem(item)) {
+                return starPoints(cx, cy, half * 1.15, half * 0.5);
+            }
+            return diamondPoints(cx, cy, half);
         }
 
 
@@ -1361,11 +1419,11 @@
 
             const visible = visibleItems();
 
-            // Pre-compute which benefits are visible for each row so the
+            // Pre-compute which overlays are visible for each row so the
             // sizing and layout passes agree on what's drawn.
-            const visibleBenefits = {};
+            const visibleOverlays = {};
             for (const it of visible) {
-                visibleBenefits[it.id] = visibleBenefitsFor(it);
+                visibleOverlays[it.id] = visibleOverlaysFor(it);
             }
 
             // Natural (un-scaled) body height needed for everything.
@@ -1381,7 +1439,7 @@
                 + themeRunCount * LAYOUT.themeHeaderHeight
                 + visible.reduce((s, it) => {
                     let h = LAYOUT.rowHeight[it.level];
-                    if (visibleBenefits[it.id].length > 0) {
+                    if (visibleOverlays[it.id].length > 0) {
                         h += LAYOUT.benefitZoneHeight[it.level];
                     }
                     return s + h;
@@ -1445,7 +1503,7 @@
                 }
 
                 const barZ = sized.rowHeight[it.level];
-                const benZ = visibleBenefits[it.id].length > 0
+                const benZ = visibleOverlays[it.id].length > 0
                     ? sized.benefitZoneHeight[it.level]
                     : 0;
 
@@ -1616,7 +1674,7 @@
                 const isExp     = state.expanded.has(it.id);
                 const expand    = it.childIds.length > 0 && it.level < 3;
                 const fs        = sized.fontSize[it.level];
-                const benefits  = visibleBenefits[it.id];
+                const overlays  = visibleOverlays[it.id];
 
                 const rowG = svgEl('g', {
                     class: 'row'
@@ -1705,10 +1763,10 @@
                         const s  = barH / 1.6;
 
                         rowG.appendChild(svgEl('polygon', {
-                            class: 'marker diamond',
+                            class: 'marker',
                             'data-id':     it.id,
                             'data-colour': colourKey(it),
-                            points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                            points: pointShapePoints(it, cx, cy, s),
                         }));
 
                     } else {
@@ -1726,77 +1784,74 @@
                             rx: 3, ry: 3,
                         }));
 
-                        // Type-benefit numbered rows also get a diamond
-                        // at the right edge of the block to mark where
-                        // the benefit is delivered.
+                        // Type-benefit numbered rows also get an
+                        // end-marker (a star) at the right edge of the
+                        // block to mark where the benefit is delivered.
                         if (it.type === 'benefit') {
                             const cx = x1;
                             const cy = barY + barH / 2;
                             const s  = barH / 1.5;
                             rowG.appendChild(svgEl('polygon', {
-                                class: 'marker end-diamond',
+                                class: 'marker end-marker',
                                 'data-id':     it.id,
                                 'data-colour': colourKey(it),
-                                points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                                points: pointShapePoints(it, cx, cy, s),
                             }));
                         }
                     }
                 }
 
 
-                // Benefit children (b-level rows) plotted in this row.
-                // Diamonds are drawn on top of the parent's gantt bar
-                // (same vertical centre); only the caption text lives
-                // in the benefit zone below the bar.
-                if (benefits.length > 0) {
+                // Overlay markers (benefits + single-point children)
+                // sit on top of the parent's gantt bar at the same
+                // vertical centre, with a small wrapped caption below
+                // the bar inside the overlay (caption) zone.
+                if (overlays.length > 0) {
 
                     const barH     = sized.barHeight[it.level];
                     const barCy    = (barZone - barH) / 2 + barH / 2;   // == barZone / 2
 
                     const benZoneY = barZone;
                     const benH     = sized.benefitZoneHeight[it.level];
-                    const diaSize  = sized.benefitDiamondSize[it.level];
+                    const ovSize   = sized.benefitDiamondSize[it.level];
                     const benFs    = sized.benefitFontSize[it.level];
 
                     const lblY     = benZoneY + 2;
                     const lblH     = Math.max(8, benH - 4);
                     const lblW     = Math.max(monthWidth * 1.4, 70);
 
-                    for (const b of benefits) {
+                    for (const ov of overlays) {
 
-                        if (!b.start) continue;
+                        if (!ov.start) continue;
 
-                        const cx = xForMonthStart(b.start) + monthWidth / 2;
+                        const cx = xForMonthStart(ov.start) + monthWidth / 2;
 
                         rowG.appendChild(svgEl('polygon', {
-                            class: 'benefit-marker',
-                            'data-id':     b.id,
-                            'data-colour': colourKey(b),
-                            points: `${cx},${barCy - diaSize} `
-                                  + `${cx + diaSize},${barCy} `
-                                  + `${cx},${barCy + diaSize} `
-                                  + `${cx - diaSize},${barCy}`,
+                            class: 'overlay-marker',
+                            'data-id':     ov.id,
+                            'data-colour': colourKey(ov),
+                            points: pointShapePoints(ov, cx, barCy, ovSize),
                         }));
 
-                        // data-id on the foreignObject so hover/click on
-                        // the label resolves to this benefit, not the
-                        // parent row underneath it.
-                        const bfo = svgEl('foreignObject', {
-                            'data-id': b.id,
+                        // data-id on the foreignObject so hover/click
+                        // on the label resolves to this overlay item,
+                        // not the host row underneath it.
+                        const ofo = svgEl('foreignObject', {
+                            'data-id': ov.id,
                             x: cx - lblW / 2,
                             y: lblY,
                             width:  lblW,
                             height: lblH,
                         });
 
-                        const blbl = document.createElementNS(XHTML_NS, 'div');
-                        blbl.setAttribute('class', 'benefit-label');
-                        blbl.style.fontSize    = benFs + 'px';
-                        blbl.style.lineHeight  = '1.15';
-                        blbl.textContent       = b.title;
+                        const olbl = document.createElementNS(XHTML_NS, 'div');
+                        olbl.setAttribute('class', 'overlay-label');
+                        olbl.style.fontSize    = benFs + 'px';
+                        olbl.style.lineHeight  = '1.15';
+                        olbl.textContent       = ov.title;
 
-                        bfo.appendChild(blbl);
-                        rowG.appendChild(bfo);
+                        ofo.appendChild(olbl);
+                        rowG.appendChild(ofo);
                     }
                 }
             }
@@ -1871,13 +1926,13 @@
 
         document.getElementById('body-chart').addEventListener('click', (e) => {
 
-            // If a benefit element was clicked, do nothing - benefits
-            // aren't expandable, and we don't want a misclick to expand
-            // the host row.
+            // Overlay items (benefits + point-children) aren't
+            // expandable; a click on one should just leave the tooltip
+            // showing and not toggle the host row.
             const hit = e.target.closest('[data-id]');
             if (hit) {
                 const hitItem = state.byId[hit.dataset.id];
-                if (hitItem && hitItem.isBenefit) return;
+                if (hitItem && isOverlay(hitItem)) return;
             }
 
             const rowG = e.target.closest('.row.expandable');
@@ -1926,7 +1981,9 @@
                 ? formatMonthYear(item.start)
                 : (formatMonthYear(item.start) + '  -  ' + formatMonthYear(item.end));
 
-            const levelText = item.isBenefit ? 'benefit' : ('level ' + item.level);
+            const levelText = item.isBenefit
+                ? 'benefit'
+                : ('level ' + item.level + (item.isPoint && item.parentId ? ' (point)' : ''));
             const confText  = item.confidence
                 ? ({ h: 'high', m: 'medium', l: 'low' })[item.confidence] + ' confidence'
                 : null;
