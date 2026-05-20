@@ -1,0 +1,1358 @@
+<!doctype html>
+<html lang="en">
+<head>
+
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <title>Roadmap Visualiser</title>
+
+
+    <!--
+        ============================================================
+        Styling - dark blue corporate look.
+        Keep this section first so the cards render correctly even
+        before SheetJS loads.
+        ============================================================
+    -->
+    <style>
+
+        :root {
+            --bg:          #0a1e3f;
+            --bg-deep:     #061634;
+            --bg-card:     #122a52;
+            --bg-input:    #1a3868;
+            --border:      #2a4f8a;
+            --fg:          #e6edf7;
+            --fg-muted:    #a8b5d1;
+            --fg-dim:      #6a85ba;
+
+            --benefit:     #3ec7c9;
+            --product:     #f0b429;
+            --milestone:   #ff6b6b;
+        }
+
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+            font-size: 14px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+
+        /* ---- Modal cards (bootstrap / upload / sheet picker) ---- */
+
+        .card {
+            max-width: 480px;
+            margin: 80px auto;
+            padding: 32px 40px;
+            background: var(--bg-card);
+            border-radius: 10px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+        }
+
+        .card h1, .card h2 {
+            margin: 0 0 12px 0;
+            font-weight: 500;
+            letter-spacing: 0.2px;
+        }
+
+        .card h1 { font-size: 22px; }
+        .card h2 { font-size: 18px; }
+
+        .card p { color: var(--fg-muted); line-height: 1.5; }
+
+        .card label {
+            display: block;
+            margin: 16px 0 4px 0;
+            color: var(--fg-muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .card input[type="text"],
+        .card select {
+            width: 100%;
+            padding: 9px 11px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 5px;
+            font-size: 14px;
+            font-family: inherit;
+        }
+
+        .card input[type="file"] {
+            display: block;
+            margin-top: 10px;
+            color: var(--fg-muted);
+        }
+
+        .card input[type="file"]::file-selector-button {
+            margin-right: 12px;
+            padding: 7px 14px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+
+        .card button {
+            margin-top: 20px;
+            padding: 10px 26px;
+            background: #2a5fb0;
+            border: none;
+            color: var(--fg);
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-family: inherit;
+            transition: background 120ms ease;
+        }
+
+        .card button:hover { background: #3a78d4; }
+
+        .card .hint {
+            margin-top: 18px;
+            padding: 12px 14px;
+            background: rgba(0, 0, 0, 0.18);
+            border-left: 3px solid var(--border);
+            font-size: 12px;
+            color: var(--fg-muted);
+            line-height: 1.5;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .card .hint code {
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1px 5px;
+            border-radius: 3px;
+            font-size: 11.5px;
+        }
+
+
+        /* ---- Toolbar ---- */
+
+        #toolbar {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            background: var(--bg-deep);
+            border-bottom: 1px solid var(--border);
+            gap: 28px;
+        }
+
+        #toolbar .brand {
+            font-weight: 600;
+            font-size: 15px;
+            letter-spacing: 0.4px;
+        }
+
+        .type-toggles {
+            display: flex;
+            gap: 16px;
+        }
+
+        .type-toggles label {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .type-toggles .swatch {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        .swatch.benefit   { background: var(--benefit);   }
+        .swatch.product   { background: var(--product);   }
+        .swatch.milestone { background: var(--milestone); }
+
+        #reload-link {
+            margin-left: auto;
+            color: var(--fg-muted);
+            font-size: 13px;
+            text-decoration: none;
+        }
+
+        #reload-link:hover { color: var(--fg); text-decoration: underline; }
+
+
+        /* ---- Chart container ---- */
+
+        #chart-wrap {
+            padding: 16px 16px 40px;
+            overflow-x: auto;
+        }
+
+        #chart {
+            display: block;
+            background: transparent;
+        }
+
+
+        /* ---- Chart elements ---- */
+
+        .swimlane           { transition: fill 120ms ease; }
+        .axis-line          { stroke: var(--border); stroke-width: 1; }
+        .tick-line          { stroke: rgba(255, 255, 255, 0.04); stroke-width: 1; }
+        .tick-line.major    { stroke: rgba(255, 255, 255, 0.10); }
+
+        .tick-month {
+            font-size: 10px;
+            fill: var(--fg-muted);
+        }
+
+        .tick-year {
+            font-size: 13px;
+            font-weight: 600;
+            fill: var(--fg);
+        }
+
+        .theme-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            fill: var(--fg-muted);
+        }
+
+        .row              { cursor: default; }
+        .row.expandable   { cursor: pointer; }
+
+        .row-bg           { fill: transparent; transition: fill 120ms ease; }
+        .row.expandable:hover .row-bg { fill: rgba(255, 255, 255, 0.05); }
+
+        .row-label {
+            fill: var(--fg);
+            transition: fill 120ms ease;
+            pointer-events: none;
+        }
+
+        .row.expandable:hover .row-label { fill: #ffffff; }
+
+        .expand-icon {
+            fill: var(--fg-muted);
+            font-weight: 400;
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .row.expanded .expand-icon { fill: #ffffff; }
+
+
+        .bar, .marker {
+            stroke: transparent;
+            stroke-width: 0;
+            cursor: pointer;
+            transition:
+                filter 140ms ease,
+                stroke 140ms ease,
+                stroke-width 140ms ease,
+                transform 140ms ease;
+            transform-box: fill-box;
+            transform-origin: center;
+        }
+
+        .row[data-type="benefit"]   .bar,
+        .row[data-type="benefit"]   .marker { fill: var(--benefit);   }
+        .row[data-type="product"]   .bar,
+        .row[data-type="product"]   .marker { fill: var(--product);   }
+        .row[data-type="milestone"] .bar,
+        .row[data-type="milestone"] .marker { fill: var(--milestone); }
+
+        .bar:hover, .marker:hover {
+            filter: brightness(1.18) url(#hover-glow);
+            stroke: #ffffff;
+            stroke-width: 2;
+        }
+
+        .row.expanded .bar,
+        .row.expanded .marker {
+            stroke: #ffffff;
+            stroke-width: 1.6;
+            filter: drop-shadow(0 0 5px rgba(255, 255, 255, 0.35));
+        }
+
+
+        .connector {
+            fill: none;
+            stroke: var(--fg-dim);
+            stroke-width: 1.2;
+            stroke-dasharray: 3 3;
+            transition: stroke 120ms ease, stroke-width 120ms ease;
+        }
+
+        .connector.from-expanded {
+            stroke: #ffffff;
+            stroke-dasharray: 4 2;
+        }
+
+
+        /* Gentle fade-in for newly rendered rows */
+        @keyframes row-fade-in {
+            from { opacity: 0; transform: translateY(-4px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        .row, .connector {
+            animation: row-fade-in 200ms ease;
+        }
+
+
+        /* ---- Tooltip ---- */
+
+        #tooltip {
+            position: fixed;
+            pointer-events: none;
+            z-index: 10000;
+            max-width: 340px;
+            padding: 10px 14px;
+            background: rgba(6, 22, 52, 0.97);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .tt-title { font-weight: 600; font-size: 14px; }
+        .tt-meta  { color: var(--fg-muted); font-size: 11px; margin-top: 2px;
+                    text-transform: uppercase; letter-spacing: 0.5px; }
+        .tt-date  { color: #c8d3e8; margin-top: 6px; }
+        .tt-desc  { margin-top: 8px; color: var(--fg); white-space: pre-wrap; }
+
+        [hidden] { display: none !important; }
+
+    </style>
+
+
+    <!--
+        ============================================================
+        SheetJS (xlsx.full.min.js).
+
+        For now we load it from the official SheetJS CDN. This keeps
+        the HTML file small and avoids checking in a ~900KB minified
+        blob while the visualiser is still being shaped.
+
+        When you're ready to make the file fully self-contained
+        (e.g. for an offline target environment), paste the contents
+        of
+            https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js
+        between the BEGIN / END markers in the inline placeholder
+        block below, and optionally remove the CDN <script> tag.
+
+        Load order:
+          1. CDN script - defines window.XLSX if the network is
+             reachable.
+          2. Inline placeholder - empty for now; once populated it
+             takes over (or co-exists harmlessly).
+          3. The app script checks for window.XLSX and, if neither
+             source produced it, shows a one-time "load
+             xlsx.full.min.js from disk" bootstrap card so the rest
+             of the page can still be tested.
+        ============================================================
+    -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+    <script id="sheetjs-inline">
+        /* ===== BEGIN SheetJS (xlsx.full.min.js) ===================== */
+
+        /* (Paste minified library contents here to make this HTML
+           file fully self-contained. Leave empty to use the CDN
+           <script> tag above.) */
+
+        /* ===== END   SheetJS ======================================== */
+    </script>
+
+</head>
+
+
+<body>
+
+
+    <!--
+        ============================================================
+        Bootstrap card - only shown if neither the CDN script nor
+        the inline placeholder produced window.XLSX.
+        ============================================================
+    -->
+    <div id="bootstrap-card" class="card" hidden>
+
+        <h1>One-time setup</h1>
+
+        <p>
+            SheetJS (the Excel parser) didn't load from the CDN and
+            hasn't been inlined into this file yet. Load it once from
+            disk to continue, or paste the minified library into the
+            <code>&lt;script id="sheetjs-inline"&gt;</code> block at
+            the top of this HTML for a permanent, fully
+            self-contained file.
+        </p>
+
+        <label for="sheetjs-file">Load xlsx.full.min.js</label>
+        <input type="file" id="sheetjs-file" accept=".js,text/javascript">
+
+        <div class="hint">
+            Get the library from
+            <code>cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js</code>
+            (or the version of your choice). Once loaded the upload
+            screen will appear.
+        </div>
+
+    </div>
+
+
+    <!--
+        ============================================================
+        Upload card - prompt user for the Excel file.
+        ============================================================
+    -->
+    <div id="upload-card" class="card" hidden>
+
+        <h1>Roadmap Visualiser</h1>
+
+        <p>Upload an Excel workbook to begin.</p>
+
+        <label for="excel-file">Excel file</label>
+        <input type="file" id="excel-file" accept=".xlsx,.xls,.xlsm">
+
+        <div class="hint">
+            Expected columns: <code>theme</code>, <code>title</code>,
+            <code>start</code>, <code>end</code>, <code>description</code>,
+            <code>level</code> (1-3), <code>type</code>
+            (benefit / product / milestone).
+        </div>
+
+    </div>
+
+
+    <!--
+        ============================================================
+        Sheet picker - choose sheet + top-left cell of the data.
+        ============================================================
+    -->
+    <div id="sheet-picker" class="card" hidden>
+
+        <h2>Choose sheet and data location</h2>
+
+        <label for="sheet-select">Sheet</label>
+        <select id="sheet-select"></select>
+
+        <label for="topleft-input">Top-left cell of the data table</label>
+        <input id="topleft-input" type="text" value="A1" spellcheck="false">
+
+        <button id="load-btn">Load</button>
+
+    </div>
+
+
+    <!--
+        ============================================================
+        Toolbar - shown once data is loaded.
+        ============================================================
+    -->
+    <div id="toolbar" hidden>
+
+        <span class="brand">Roadmap Visualiser</span>
+
+        <div class="type-toggles">
+            <label>
+                <input type="checkbox" data-type="benefit" checked>
+                <span class="swatch benefit"></span>
+                Benefit
+            </label>
+            <label>
+                <input type="checkbox" data-type="product" checked>
+                <span class="swatch product"></span>
+                Product
+            </label>
+            <label>
+                <input type="checkbox" data-type="milestone" checked>
+                <span class="swatch milestone"></span>
+                Milestone
+            </label>
+        </div>
+
+        <a href="#" id="reload-link">Reload file</a>
+
+    </div>
+
+
+    <!--
+        ============================================================
+        Chart and tooltip.
+        ============================================================
+    -->
+    <div id="chart-wrap" hidden>
+        <svg id="chart" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+
+    <div id="tooltip" hidden></div>
+
+
+
+    <!--
+        ============================================================
+        Application script.
+        ============================================================
+    -->
+    <script>
+
+
+        /* ================================================================
+         * Section 1: state
+         * ================================================================
+         */
+
+        const state = {
+            workbook:    null,
+            items:       [],
+            byId:        {},
+            expanded:    new Set(),
+            typeFilter:  new Set(['benefit', 'product', 'milestone']),
+        };
+
+
+        const SVG_NS = 'http://www.w3.org/2000/svg';
+
+        const LAYOUT = {
+            marginLeft:    260,
+            marginRight:   40,
+            marginTop:     70,
+            marginBottom:  20,
+            minMonthWidth: 64,
+
+            rowHeight:  { 1: 40, 2: 30, 3: 24 },
+            barHeight:  { 1: 22, 2: 16, 3: 12 },
+            fontSize:   { 1: 17, 2: 14, 3: 11 },
+            labelIndent: 24,
+        };
+
+
+
+        /* ================================================================
+         * Section 2: bootstrap (load SheetJS if not inlined)
+         * ================================================================
+         */
+
+        function isXLSXReady() {
+            return typeof XLSX !== 'undefined' && XLSX && XLSX.read;
+        }
+
+
+        function showInitialScreen() {
+
+            if (isXLSXReady()) {
+                document.getElementById('bootstrap-card').hidden = true;
+                document.getElementById('upload-card').hidden    = false;
+            } else {
+                document.getElementById('bootstrap-card').hidden = false;
+                document.getElementById('upload-card').hidden    = true;
+            }
+        }
+
+
+        document.getElementById('sheetjs-file').addEventListener('change', async (e) => {
+
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const text = await file.text();
+
+                // Inject as a real <script> so it can create the global XLSX.
+                const tag = document.createElement('script');
+                tag.textContent = text;
+                document.head.appendChild(tag);
+
+                if (!isXLSXReady()) {
+                    alert('Loaded the file, but XLSX global was not defined. '
+                        + 'Did you upload the correct xlsx.full.min.js?');
+                    return;
+                }
+
+                showInitialScreen();
+
+            } catch (err) {
+                alert('Could not load SheetJS: ' + err.message);
+            }
+        });
+
+
+
+        /* ================================================================
+         * Section 3: file load & sheet picker
+         * ================================================================
+         */
+
+        document.getElementById('excel-file').addEventListener('change', async (e) => {
+
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const buffer = await file.arrayBuffer();
+
+                state.workbook = XLSX.read(buffer, {
+                    type:       'array',
+                    cellDates:  true,
+                });
+
+                const select = document.getElementById('sheet-select');
+                select.innerHTML = '';
+
+                for (const name of state.workbook.SheetNames) {
+                    const opt = document.createElement('option');
+                    opt.value       = name;
+                    opt.textContent = name;
+                    select.appendChild(opt);
+                }
+
+                document.getElementById('upload-card').hidden  = true;
+                document.getElementById('sheet-picker').hidden = false;
+
+            } catch (err) {
+                alert('Could not read workbook: ' + err.message);
+            }
+        });
+
+
+        document.getElementById('load-btn').addEventListener('click', () => {
+
+            const sheetName = document.getElementById('sheet-select').value;
+            const topLeft   = (document.getElementById('topleft-input').value || 'A1').trim();
+            const sheet     = state.workbook.Sheets[sheetName];
+
+            try {
+                loadData(sheet, topLeft);
+            } catch (err) {
+                alert('Could not load data: ' + err.message);
+                return;
+            }
+
+            document.getElementById('sheet-picker').hidden = true;
+            document.getElementById('toolbar').hidden      = false;
+            document.getElementById('chart-wrap').hidden   = false;
+
+            render();
+        });
+
+
+        document.getElementById('reload-link').addEventListener('click', (e) => {
+
+            e.preventDefault();
+
+            state.items    = [];
+            state.byId     = {};
+            state.expanded = new Set();
+
+            document.getElementById('chart').innerHTML     = '';
+            document.getElementById('toolbar').hidden      = true;
+            document.getElementById('chart-wrap').hidden   = true;
+            document.getElementById('sheet-picker').hidden = true;
+            document.getElementById('upload-card').hidden  = false;
+        });
+
+
+
+        /* ================================================================
+         * Section 4: cell-reference parsing & data extraction
+         * ================================================================
+         */
+
+        function parseCellRef(ref) {
+
+            const m = /^([A-Za-z]+)(\d+)$/.exec(String(ref).trim());
+            if (!m) throw new Error('Invalid cell reference: ' + ref);
+
+            let col = 0;
+            for (const ch of m[1].toUpperCase()) {
+                col = col * 26 + (ch.charCodeAt(0) - 64);
+            }
+
+            return {
+                c: col - 1,
+                r: parseInt(m[2], 10) - 1,
+            };
+        }
+
+
+        const HEADER_ALIASES = {
+            theme:       ['theme'],
+            title:       ['title', 'name'],
+            start:       ['start', 'start date', 'from'],
+            end:         ['end', 'end date', 'to'],
+            description: ['description', 'summary', 'summary description', 'notes'],
+            level:       ['level'],
+            type:        ['type', 'category'],
+        };
+
+
+        const KNOWN_TYPES = ['benefit', 'product', 'milestone'];
+
+
+        function loadData(sheet, topLeftRef) {
+
+            if (!sheet || !sheet['!ref']) {
+                throw new Error('Sheet is empty.');
+            }
+
+            const topLeft = parseCellRef(topLeftRef);
+
+            const fullRange = XLSX.utils.decode_range(sheet['!ref']);
+
+            if (topLeft.r < fullRange.s.r || topLeft.c < fullRange.s.c
+             || topLeft.r > fullRange.e.r || topLeft.c > fullRange.e.c) {
+                throw new Error(
+                    'Top-left cell ' + topLeftRef + ' is outside the populated range.'
+                );
+            }
+
+            const subRange = {
+                s: { r: topLeft.r, c: topLeft.c },
+                e: { r: fullRange.e.r, c: fullRange.e.c },
+            };
+
+            const rows = XLSX.utils.sheet_to_json(sheet, {
+                header: 1,
+                range:  XLSX.utils.encode_range(subRange),
+                defval: null,
+                raw:    true,
+            });
+
+            if (rows.length < 2) {
+                throw new Error('No data rows found below the header.');
+            }
+
+            const headerRow = rows[0].map(v => v == null ? '' : String(v).trim().toLowerCase());
+
+            const columnIndex = {};
+            for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
+                columnIndex[field] = headerRow.findIndex(h => aliases.includes(h));
+            }
+
+            // Fallback to positional order for any header we didn't recognise.
+            const positional = ['theme', 'title', 'start', 'end', 'description', 'level', 'type'];
+            for (let i = 0; i < positional.length; i++) {
+                if (columnIndex[positional[i]] === -1 && i < headerRow.length) {
+                    columnIndex[positional[i]] = i;
+                }
+            }
+
+            const items = [];
+
+            for (let i = 1; i < rows.length; i++) {
+
+                const row   = rows[i];
+                const title = row[columnIndex.title];
+
+                if (title == null || String(title).trim() === '') continue;
+
+                const start = parseMonthYear(row[columnIndex.start]);
+                const end   = parseMonthYear(row[columnIndex.end]) || start;
+
+                let level = parseInt(row[columnIndex.level], 10);
+                if (isNaN(level) || level < 1 || level > 3) level = 1;
+
+                let type = String(row[columnIndex.type] || '').trim().toLowerCase();
+                if (!KNOWN_TYPES.includes(type)) type = 'milestone';
+
+                items.push({
+                    id:          'item-' + i,
+                    theme:       String(row[columnIndex.theme] || '').trim() || '(unspecified)',
+                    title:       String(title).trim(),
+                    description: String(row[columnIndex.description] || '').trim(),
+                    start:       start,
+                    end:         end,
+                    level:       level,
+                    type:        type,
+                    parentId:    null,
+                    childIds:    [],
+                });
+            }
+
+            if (items.length === 0) {
+                throw new Error('No rows with a title were found.');
+            }
+
+            // Parent inference: walk upwards to first row with level n-1.
+            for (let i = 0; i < items.length; i++) {
+
+                const item = items[i];
+                if (item.level === 1) continue;
+
+                for (let j = i - 1; j >= 0; j--) {
+                    if (items[j].level === item.level - 1) {
+                        item.parentId = items[j].id;
+                        items[j].childIds.push(item.id);
+                        break;
+                    }
+                }
+            }
+
+            state.items    = items;
+            state.byId     = Object.fromEntries(items.map(it => [it.id, it]));
+            state.expanded = new Set();
+        }
+
+
+
+        /* ================================================================
+         * Section 5: date parsing (month/year)
+         * ================================================================
+         */
+
+        function parseMonthYear(raw) {
+
+            if (raw == null || raw === '') return null;
+
+            if (raw instanceof Date) {
+                return new Date(raw.getFullYear(), raw.getMonth(), 1);
+            }
+
+            if (typeof raw === 'number') {
+                // SheetJS serial date number - convert.
+                const d = XLSX.SSF && XLSX.SSF.parse_date_code
+                    ? XLSX.SSF.parse_date_code(raw)
+                    : null;
+
+                if (d && d.y) return new Date(d.y, (d.m || 1) - 1, 1);
+            }
+
+            const s = String(raw).trim();
+
+            // Native parse handles "Jan 2026", "January 2026", "2026-01-01", etc.
+            const d = new Date(s);
+            if (!isNaN(d.getTime())) {
+                return new Date(d.getFullYear(), d.getMonth(), 1);
+            }
+
+            // "MM/YYYY" or "M-YYYY"
+            let m = /^(\d{1,2})[\/\-](\d{4})$/.exec(s);
+            if (m) {
+                return new Date(parseInt(m[2], 10), parseInt(m[1], 10) - 1, 1);
+            }
+
+            // "YYYY/MM" or "YYYY-MM"
+            m = /^(\d{4})[\/\-](\d{1,2})$/.exec(s);
+            if (m) {
+                return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
+            }
+
+            return null;
+        }
+
+
+        function monthsBetween(a, b) {
+            return (b.getFullYear() - a.getFullYear()) * 12
+                 + (b.getMonth()    - a.getMonth());
+        }
+
+
+        function formatMonthYear(d) {
+            if (!d) return '';
+            return d.toLocaleString('en', { month: 'short', year: 'numeric' });
+        }
+
+
+
+        /* ================================================================
+         * Section 6: which items are currently visible
+         * ================================================================
+         */
+
+        function visibleItems() {
+
+            const out = [];
+
+            function pushWithChildren(item) {
+
+                if (!state.typeFilter.has(item.type)) return;
+
+                out.push(item);
+
+                if (!state.expanded.has(item.id)) return;
+
+                for (const childId of item.childIds) {
+                    pushWithChildren(state.byId[childId]);
+                }
+            }
+
+            for (const item of state.items) {
+                if (item.level === 1) pushWithChildren(item);
+            }
+
+            return out;
+        }
+
+
+
+        /* ================================================================
+         * Section 7: render (axis, swimlanes, rows, bars, connectors)
+         * ================================================================
+         */
+
+        function svgEl(tag, attrs) {
+
+            const el = document.createElementNS(SVG_NS, tag);
+
+            if (attrs) {
+                for (const k of Object.keys(attrs)) {
+                    if (attrs[k] != null) el.setAttribute(k, attrs[k]);
+                }
+            }
+
+            return el;
+        }
+
+
+        function render() {
+
+            const svg = document.getElementById('chart');
+            svg.innerHTML = '';
+
+
+            // --- Defs (filters) ---
+
+            const defs = svgEl('defs');
+            const filter = svgEl('filter', {
+                id: 'hover-glow',
+                x: '-20%', y: '-50%', width: '140%', height: '200%',
+            });
+            filter.appendChild(svgEl('feDropShadow', {
+                dx: 0, dy: 2, stdDeviation: 3,
+                'flood-color': '#000', 'flood-opacity': 0.55,
+            }));
+            defs.appendChild(filter);
+            svg.appendChild(defs);
+
+
+            if (state.items.length === 0) return;
+
+
+            // --- Date range ---
+
+            let minDate = null, maxDate = null;
+
+            for (const it of state.items) {
+                if (it.start && (!minDate || it.start < minDate)) minDate = it.start;
+                if (it.end   && (!maxDate || it.end   > maxDate)) maxDate = it.end;
+            }
+
+            if (!minDate || !maxDate) {
+                // No usable dates - bail out with a message.
+                const msg = svgEl('text', {
+                    x: 24, y: 40,
+                    fill: '#a8b5d1', 'font-size': 14,
+                });
+                msg.textContent = 'No usable dates found - check the start/end columns.';
+                svg.appendChild(msg);
+                svg.setAttribute('width',  600);
+                svg.setAttribute('height', 80);
+                svg.setAttribute('viewBox', '0 0 600 80');
+                return;
+            }
+
+            // Pad by 1 month on each side, plus 1 extra at the end so the
+            // last month's block has somewhere to extend to.
+            minDate = new Date(minDate.getFullYear(), minDate.getMonth() - 1, 1);
+            maxDate = new Date(maxDate.getFullYear(), maxDate.getMonth() + 2, 1);
+
+            const totalMonths = monthsBetween(minDate, maxDate);
+
+
+            // --- Sizing ---
+
+            const containerWidth = document.getElementById('chart-wrap').clientWidth - 32;
+
+            const usableWidthMin  = LAYOUT.minMonthWidth * totalMonths;
+            const usableWidthFit  = containerWidth - LAYOUT.marginLeft - LAYOUT.marginRight;
+            const usableWidth     = Math.max(usableWidthFit, usableWidthMin);
+            const monthWidth      = usableWidth / totalMonths;
+            const chartWidth      = LAYOUT.marginLeft + usableWidth + LAYOUT.marginRight;
+
+
+            function xForMonthStart(d) {
+                return LAYOUT.marginLeft + monthsBetween(minDate, d) * monthWidth;
+            }
+
+            function xForMonthEnd(d) {
+                return LAYOUT.marginLeft + (monthsBetween(minDate, d) + 1) * monthWidth;
+            }
+
+
+            // --- Visible rows & vertical layout ---
+
+            const visible = visibleItems();
+
+            const rowY = {};
+            let y = LAYOUT.marginTop;
+
+            for (const it of visible) {
+                rowY[it.id] = y;
+                y += LAYOUT.rowHeight[it.level];
+            }
+
+            const chartHeight = Math.max(y + LAYOUT.marginBottom, LAYOUT.marginTop + 80);
+
+            svg.setAttribute('width',   chartWidth);
+            svg.setAttribute('height',  chartHeight);
+            svg.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`);
+
+
+            // --- Swimlanes (one band per contiguous run of same theme) ---
+
+            const swimG = svgEl('g', { id: 'swimlanes' });
+            svg.appendChild(swimG);
+
+            let bandIndex = 0;
+            let i = 0;
+
+            while (i < visible.length) {
+
+                const theme = visible[i].theme;
+                const start = i;
+
+                while (i < visible.length && visible[i].theme === theme) i++;
+
+                const last  = i - 1;
+                const yTop  = rowY[visible[start].id];
+                const yBot  = rowY[visible[last].id] + LAYOUT.rowHeight[visible[last].level];
+
+                const fill = bandIndex % 2 === 0
+                    ? 'rgba(255, 255, 255, 0.03)'
+                    : 'rgba(255, 255, 255, 0.07)';
+
+                swimG.appendChild(svgEl('rect', {
+                    class: 'swimlane',
+                    x: 0, y: yTop,
+                    width: chartWidth,
+                    height: yBot - yTop,
+                    fill: fill,
+                }));
+
+                const lbl = svgEl('text', {
+                    class: 'theme-label',
+                    x: 16,
+                    y: yTop + 20,
+                });
+                lbl.textContent = theme;
+                swimG.appendChild(lbl);
+
+                bandIndex++;
+            }
+
+
+            // --- Time axis ---
+
+            const axisG = svgEl('g', { id: 'time-axis' });
+            svg.appendChild(axisG);
+
+            axisG.appendChild(svgEl('line', {
+                class: 'axis-line',
+                x1: LAYOUT.marginLeft,
+                x2: chartWidth - LAYOUT.marginRight,
+                y1: LAYOUT.marginTop - 6,
+                y2: LAYOUT.marginTop - 6,
+            }));
+
+            let cur = new Date(minDate);
+
+            for (let mi = 0; mi < totalMonths; mi++) {
+
+                const xx     = xForMonthStart(cur);
+                const isJan  = cur.getMonth() === 0;
+                const isStart = mi === 0;
+
+                axisG.appendChild(svgEl('line', {
+                    class: 'tick-line' + (isJan ? ' major' : ''),
+                    x1: xx, x2: xx,
+                    y1: LAYOUT.marginTop - 6,
+                    y2: chartHeight - LAYOUT.marginBottom,
+                }));
+
+                const monthLbl = svgEl('text', {
+                    class: 'tick-month',
+                    x: xx + monthWidth / 2,
+                    y: LAYOUT.marginTop - 14,
+                    'text-anchor': 'middle',
+                });
+                monthLbl.textContent = cur.toLocaleString('en', { month: 'short' });
+                axisG.appendChild(monthLbl);
+
+                if (isJan || isStart) {
+                    const yearLbl = svgEl('text', {
+                        class: 'tick-year',
+                        x: xx + 6,
+                        y: LAYOUT.marginTop - 36,
+                    });
+                    yearLbl.textContent = cur.getFullYear();
+                    axisG.appendChild(yearLbl);
+                }
+
+                cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+            }
+
+
+            // --- Rows ---
+
+            const rowsG = svgEl('g', { id: 'rows' });
+            svg.appendChild(rowsG);
+
+            for (const it of visible) {
+
+                const ry      = rowY[it.id];
+                const rh      = LAYOUT.rowHeight[it.level];
+                const indent  = (it.level - 1) * LAYOUT.labelIndent;
+                const isExp   = state.expanded.has(it.id);
+                const expand  = it.childIds.length > 0 && it.level < 3;
+
+                const rowG = svgEl('g', {
+                    class: 'row'
+                        + (expand ? ' expandable' : '')
+                        + (isExp  ? ' expanded'   : ''),
+                    'data-id':    it.id,
+                    'data-level': it.level,
+                    'data-type':  it.type,
+                    transform:    `translate(0, ${ry})`,
+                });
+                rowsG.appendChild(rowG);
+
+
+                // Row background (catches hover + click).
+                rowG.appendChild(svgEl('rect', {
+                    class: 'row-bg',
+                    x: 0, y: 0,
+                    width: chartWidth, height: rh,
+                }));
+
+
+                // Expand icon (only if it has children that can be shown).
+                if (expand) {
+                    const tri = svgEl('text', {
+                        class: 'expand-icon',
+                        x: 70 + indent,
+                        y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
+                        'font-size': LAYOUT.fontSize[it.level],
+                    });
+                    tri.textContent = isExp ? '▾' : '▸';
+                    rowG.appendChild(tri);
+                }
+
+
+                // Title label.
+                const lbl = svgEl('text', {
+                    class: 'row-label',
+                    x: 90 + indent,
+                    y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
+                    'font-size': LAYOUT.fontSize[it.level],
+                });
+                lbl.textContent = it.title;
+                rowG.appendChild(lbl);
+
+
+                // Bar or marker.
+                if (it.start && it.end) {
+
+                    const isPoint = it.start.getTime() === it.end.getTime();
+                    const barH    = LAYOUT.barHeight[it.level];
+                    const barY    = (rh - barH) / 2;
+
+                    if (isPoint) {
+
+                        const cx = xForMonthStart(it.start) + monthWidth / 2;
+                        const cy = barY + barH / 2;
+                        const s  = barH / 1.6;
+
+                        rowG.appendChild(svgEl('polygon', {
+                            class: 'marker diamond',
+                            'data-id': it.id,
+                            points: `${cx},${cy - s} ${cx + s},${cy} ${cx},${cy + s} ${cx - s},${cy}`,
+                        }));
+
+                    } else {
+
+                        const x0 = xForMonthStart(it.start);
+                        const x1 = xForMonthEnd(it.end);
+
+                        rowG.appendChild(svgEl('rect', {
+                            class: 'bar',
+                            'data-id': it.id,
+                            x: x0, y: barY,
+                            width: Math.max(x1 - x0, 4),
+                            height: barH,
+                            rx: 3, ry: 3,
+                        }));
+                    }
+                }
+            }
+
+
+            // --- Connectors (parent -> child) ---
+
+            const connG = svgEl('g', { id: 'connectors' });
+            svg.appendChild(connG);
+
+            for (const it of visible) {
+
+                if (!it.parentId) continue;
+
+                const parent = state.byId[it.parentId];
+                if (!(parent.id in rowY)) continue;
+
+                const parentIndentX = 70 + (parent.level - 1) * LAYOUT.labelIndent + 6;
+                const childIndentX  = 90 + (it.level     - 1) * LAYOUT.labelIndent - 4;
+
+                const startY = rowY[parent.id] + LAYOUT.rowHeight[parent.level];
+                const endY   = rowY[it.id]     + LAYOUT.rowHeight[it.level] / 2;
+
+                connG.appendChild(svgEl('path', {
+                    class: 'connector from-expanded',
+                    d: `M ${parentIndentX} ${startY} `
+                     + `L ${parentIndentX} ${endY} `
+                     + `L ${childIndentX}  ${endY}`,
+                }));
+            }
+        }
+
+
+
+        /* ================================================================
+         * Section 8: interactions (toggle types, expand, hover tooltip)
+         * ================================================================
+         */
+
+        document.querySelectorAll('.type-toggles input').forEach(cb => {
+            cb.addEventListener('change', () => {
+
+                if (cb.checked) state.typeFilter.add(cb.dataset.type);
+                else            state.typeFilter.delete(cb.dataset.type);
+
+                render();
+            });
+        });
+
+
+        document.getElementById('chart').addEventListener('click', (e) => {
+
+            const rowG = e.target.closest('.row.expandable');
+            if (!rowG) return;
+
+            const id   = rowG.dataset.id;
+            const item = state.byId[id];
+            if (!item) return;
+
+            if (state.expanded.has(id)) state.expanded.delete(id);
+            else                        state.expanded.add(id);
+
+            render();
+        });
+
+
+        const tooltip = document.getElementById('tooltip');
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, c => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;',
+                '"': '&quot;', "'": '&#39;',
+            }[c]));
+        }
+
+        document.getElementById('chart').addEventListener('mousemove', (e) => {
+
+            const target = e.target.closest('[data-id]');
+
+            if (!target) {
+                tooltip.hidden = true;
+                return;
+            }
+
+            const item = state.byId[target.dataset.id];
+
+            if (!item) {
+                tooltip.hidden = true;
+                return;
+            }
+
+            const same = item.start && item.end
+                      && item.start.getTime() === item.end.getTime();
+
+            const dateLine = same
+                ? formatMonthYear(item.start)
+                : (formatMonthYear(item.start) + '  -  ' + formatMonthYear(item.end));
+
+            tooltip.innerHTML =
+                '<div class="tt-title">' + escapeHtml(item.title) + '</div>'
+              + '<div class="tt-meta">'
+              +     escapeHtml(item.theme) + ' &middot; '
+              +     escapeHtml(item.type)  + ' &middot; '
+              +     'level ' + item.level
+              + '</div>'
+              + '<div class="tt-date">' + dateLine + '</div>'
+              + '<div class="tt-desc">'
+              +     escapeHtml(item.description || '(no description)')
+              + '</div>';
+
+            tooltip.hidden = false;
+
+            // Position with edge avoidance.
+            const pad   = 14;
+            const tw    = tooltip.offsetWidth;
+            const th    = tooltip.offsetHeight;
+            const vw    = window.innerWidth;
+            const vh    = window.innerHeight;
+
+            let left = e.clientX + pad;
+            let top  = e.clientY + pad;
+
+            if (left + tw + pad > vw) left = e.clientX - tw - pad;
+            if (top  + th + pad > vh) top  = e.clientY - th - pad;
+
+            tooltip.style.left = left + 'px';
+            tooltip.style.top  = top  + 'px';
+        });
+
+
+        document.getElementById('chart').addEventListener('mouseleave', () => {
+            tooltip.hidden = true;
+        });
+
+
+        // Debounced re-render on window resize.
+        let resizeTimer = null;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if (state.items.length > 0) render();
+            }, 150);
+        });
+
+
+
+        /* ================================================================
+         * Kick things off
+         * ================================================================
+         */
+
+        showInitialScreen();
+
+    </script>
+
+
+</body>
+</html>
