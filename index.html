@@ -209,6 +209,7 @@
 
         .swimlane           { transition: fill 120ms ease; }
         .axis-line          { stroke: var(--border); stroke-width: 1; }
+        .rail-divider       { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
         .tick-line          { stroke: rgba(255, 255, 255, 0.04); stroke-width: 1; }
         .tick-line.major    { stroke: rgba(255, 255, 255, 0.10); }
 
@@ -303,10 +304,19 @@
         }
 
 
-        /* Gentle fade-in for newly rendered rows */
+        /*
+         * Gentle fade-in for newly rendered rows.
+         *
+         * Note: we animate opacity only. Animating `transform` on an
+         * SVG <g> via CSS competes with the element's `transform`
+         * attribute (which we use to position the row vertically) and
+         * leaves rows stuck at translate(0, 0) once the animation
+         * ends - which manifested as expanded children flashing at
+         * the top of the chart and then disappearing.
+         */
         @keyframes row-fade-in {
-            from { opacity: 0; transform: translateY(-4px); }
-            to   { opacity: 1; transform: translateY(0); }
+            from { opacity: 0; }
+            to   { opacity: 1; }
         }
 
         .row, .connector {
@@ -531,11 +541,25 @@
         const SVG_NS = 'http://www.w3.org/2000/svg';
 
         const LAYOUT = {
-            marginLeft:    260,
+
+            // Left margin is split into two columns:
+            //   [ theme rail | row-label area ]
+            // marginLeft is the total of both - the timeline starts
+            // immediately to the right of it.
+            themeRailWidth: 90,
+            labelAreaWidth: 430,
+            get marginLeft() { return this.themeRailWidth + this.labelAreaWidth; },
+
             marginRight:   40,
             marginTop:     70,
             marginBottom:  20,
             minMonthWidth: 64,
+
+            // Horizontal padding inside each column.
+            themeLabelPad:  12,    // left padding for theme labels
+            labelLeftPad:   16,    // padding from rail divider to triangle
+            triangleGap:    18,    // gap between triangle and row label
+            labelRightPad:  12,    // padding before timeline starts
 
             rowHeight:  { 1: 40, 2: 30, 3: 24 },
             barHeight:  { 1: 22, 2: 16, 3: 12 },
@@ -1046,9 +1070,10 @@
                     fill: fill,
                 }));
 
+                // Theme label - sits in the dedicated rail at the very left.
                 const lbl = svgEl('text', {
                     class: 'theme-label',
-                    x: 16,
+                    x: LAYOUT.themeLabelPad,
                     y: yTop + 20,
                 });
                 lbl.textContent = theme;
@@ -1056,6 +1081,15 @@
 
                 bandIndex++;
             }
+
+            // Vertical divider between the theme rail and the row-label area.
+            svg.appendChild(svgEl('line', {
+                class: 'rail-divider',
+                x1: LAYOUT.themeRailWidth,
+                x2: LAYOUT.themeRailWidth,
+                y1: LAYOUT.marginTop - 6,
+                y2: chartHeight - LAYOUT.marginBottom,
+            }));
 
 
             // --- Time axis ---
@@ -1142,11 +1176,16 @@
                 }));
 
 
+                // Row-label area starts right after the theme rail.
+                const triX   = LAYOUT.themeRailWidth + LAYOUT.labelLeftPad + indent;
+                const labelX = triX + LAYOUT.triangleGap;
+
+
                 // Expand icon (only if it has children that can be shown).
                 if (expand) {
                     const tri = svgEl('text', {
                         class: 'expand-icon',
-                        x: 70 + indent,
+                        x: triX,
                         y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
                         'font-size': LAYOUT.fontSize[it.level],
                     });
@@ -1158,7 +1197,7 @@
                 // Title label.
                 const lbl = svgEl('text', {
                     class: 'row-label',
-                    x: 90 + indent,
+                    x: labelX,
                     y: rh / 2 + LAYOUT.fontSize[it.level] / 3,
                     'font-size': LAYOUT.fontSize[it.level],
                 });
@@ -1215,8 +1254,15 @@
                 const parent = state.byId[it.parentId];
                 if (!(parent.id in rowY)) continue;
 
-                const parentIndentX = 70 + (parent.level - 1) * LAYOUT.labelIndent + 6;
-                const childIndentX  = 90 + (it.level     - 1) * LAYOUT.labelIndent - 4;
+                const parentTriX = LAYOUT.themeRailWidth
+                                 + LAYOUT.labelLeftPad
+                                 + (parent.level - 1) * LAYOUT.labelIndent;
+                const childTriX  = LAYOUT.themeRailWidth
+                                 + LAYOUT.labelLeftPad
+                                 + (it.level     - 1) * LAYOUT.labelIndent;
+
+                const parentIndentX = parentTriX + 6;
+                const childIndentX  = childTriX  - 4;
 
                 const startY = rowY[parent.id] + LAYOUT.rowHeight[parent.level];
                 const endY   = rowY[it.id]     + LAYOUT.rowHeight[it.level] / 2;
