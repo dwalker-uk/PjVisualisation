@@ -209,7 +209,7 @@
 
         .swimlane           { transition: fill 120ms ease; }
         .axis-line          { stroke: var(--border); stroke-width: 1; }
-        .rail-divider       { stroke: var(--border); stroke-width: 1; opacity: 0.5; }
+        .theme-divider      { stroke: var(--border); stroke-width: 1; opacity: 0.55; }
         .tick-line          { stroke: rgba(255, 255, 255, 0.04); stroke-width: 1; }
         .tick-line.major    { stroke: rgba(255, 255, 255, 0.10); }
 
@@ -225,11 +225,11 @@
         }
 
         .theme-label {
-            font-size: 11px;
-            font-weight: 600;
-            letter-spacing: 1px;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 2px;
             text-transform: uppercase;
-            fill: var(--fg-muted);
+            fill: var(--fg);
         }
 
         .row              { cursor: default; }
@@ -542,24 +542,22 @@
 
         const LAYOUT = {
 
-            // Left margin is split into two columns:
-            //   [ theme rail | row-label area ]
-            // marginLeft is the total of both - the timeline starts
-            // immediately to the right of it.
-            themeRailWidth: 90,
-            labelAreaWidth: 430,
-            get marginLeft() { return this.themeRailWidth + this.labelAreaWidth; },
-
+            // Single column on the left for row titles. Themes get their
+            // own header row stacked above the rows that belong to them,
+            // so they no longer compete for horizontal space.
+            marginLeft:    500,
             marginRight:   40,
             marginTop:     70,
             marginBottom:  20,
             minMonthWidth: 64,
 
-            // Horizontal padding inside each column.
-            themeLabelPad:  12,    // left padding for theme labels
-            labelLeftPad:   16,    // padding from rail divider to triangle
+            // Horizontal padding inside the label column.
+            labelLeftPad:   16,    // padding from chart edge to triangle
             triangleGap:    18,    // gap between triangle and row label
-            labelRightPad:  12,    // padding before timeline starts
+
+            // Vertical space reserved above each theme's rows for the
+            // theme heading.
+            themeHeaderHeight: 38,
 
             rowHeight:  { 1: 40, 2: 30, 3: 24 },
             barHeight:  { 1: 22, 2: 16, 3: 12 },
@@ -1024,13 +1022,39 @@
 
             const visible = visibleItems();
 
-            const rowY = {};
-            let y = LAYOUT.marginTop;
+
+            // Vertical layout - groups visible items by contiguous theme
+            // runs and inserts a header gap before each group so the
+            // theme heading has its own space.
+
+            const rowY       = {};
+            const themeBands = [];        // [{ theme, headerY, yTop, yBot }]
+
+            let y            = LAYOUT.marginTop;
+            let currentBand  = null;
 
             for (const it of visible) {
+
+                if (!currentBand || it.theme !== currentBand.theme) {
+
+                    if (currentBand) currentBand.yBot = y;
+
+                    currentBand = {
+                        theme:   it.theme,
+                        headerY: y,
+                        yTop:    y,
+                        yBot:    0,
+                    };
+                    themeBands.push(currentBand);
+
+                    y += LAYOUT.themeHeaderHeight;
+                }
+
                 rowY[it.id] = y;
                 y += LAYOUT.rowHeight[it.level];
             }
+
+            if (currentBand) currentBand.yBot = y;
 
             const chartHeight = Math.max(y + LAYOUT.marginBottom, LAYOUT.marginTop + 80);
 
@@ -1039,57 +1063,42 @@
             svg.setAttribute('viewBox', `0 0 ${chartWidth} ${chartHeight}`);
 
 
-            // --- Swimlanes (one band per contiguous run of same theme) ---
+            // --- Theme bands: shaded background plus a heading row ---
 
             const swimG = svgEl('g', { id: 'swimlanes' });
             svg.appendChild(swimG);
 
-            let bandIndex = 0;
-            let i = 0;
-
-            while (i < visible.length) {
-
-                const theme = visible[i].theme;
-                const start = i;
-
-                while (i < visible.length && visible[i].theme === theme) i++;
-
-                const last  = i - 1;
-                const yTop  = rowY[visible[start].id];
-                const yBot  = rowY[visible[last].id] + LAYOUT.rowHeight[visible[last].level];
+            themeBands.forEach((band, bandIndex) => {
 
                 const fill = bandIndex % 2 === 0
                     ? 'rgba(255, 255, 255, 0.03)'
                     : 'rgba(255, 255, 255, 0.07)';
 
+                // Shaded band spans the heading and the rows together.
                 swimG.appendChild(svgEl('rect', {
                     class: 'swimlane',
-                    x: 0, y: yTop,
+                    x: 0, y: band.yTop,
                     width: chartWidth,
-                    height: yBot - yTop,
+                    height: band.yBot - band.yTop,
                     fill: fill,
                 }));
 
-                // Theme label - sits in the dedicated rail at the very left.
+                // Top border to visually separate the band.
+                swimG.appendChild(svgEl('line', {
+                    class: 'theme-divider',
+                    x1: 0,                  x2: chartWidth,
+                    y1: band.yTop + 0.5,    y2: band.yTop + 0.5,
+                }));
+
+                // Theme heading, centred vertically in the header area.
                 const lbl = svgEl('text', {
                     class: 'theme-label',
-                    x: LAYOUT.themeLabelPad,
-                    y: yTop + 20,
+                    x: LAYOUT.labelLeftPad,
+                    y: band.headerY + LAYOUT.themeHeaderHeight / 2 + 5,
                 });
-                lbl.textContent = theme;
+                lbl.textContent = band.theme;
                 swimG.appendChild(lbl);
-
-                bandIndex++;
-            }
-
-            // Vertical divider between the theme rail and the row-label area.
-            svg.appendChild(svgEl('line', {
-                class: 'rail-divider',
-                x1: LAYOUT.themeRailWidth,
-                x2: LAYOUT.themeRailWidth,
-                y1: LAYOUT.marginTop - 6,
-                y2: chartHeight - LAYOUT.marginBottom,
-            }));
+            });
 
 
             // --- Time axis ---
@@ -1176,8 +1185,7 @@
                 }));
 
 
-                // Row-label area starts right after the theme rail.
-                const triX   = LAYOUT.themeRailWidth + LAYOUT.labelLeftPad + indent;
+                const triX   = LAYOUT.labelLeftPad + indent;
                 const labelX = triX + LAYOUT.triangleGap;
 
 
@@ -1254,11 +1262,9 @@
                 const parent = state.byId[it.parentId];
                 if (!(parent.id in rowY)) continue;
 
-                const parentTriX = LAYOUT.themeRailWidth
-                                 + LAYOUT.labelLeftPad
+                const parentTriX = LAYOUT.labelLeftPad
                                  + (parent.level - 1) * LAYOUT.labelIndent;
-                const childTriX  = LAYOUT.themeRailWidth
-                                 + LAYOUT.labelLeftPad
+                const childTriX  = LAYOUT.labelLeftPad
                                  + (it.level     - 1) * LAYOUT.labelIndent;
 
                 const parentIndentX = parentTriX + 6;
