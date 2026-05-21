@@ -178,22 +178,6 @@
             letter-spacing: 0.4px;
         }
 
-        .type-toggles,
-        .conf-toggles {
-            display: flex;
-            gap: 16px;
-            align-items: center;
-        }
-
-        .type-toggles label,
-        .conf-toggles label {
-            display: flex;
-            align-items: center;
-            gap: 7px;
-            cursor: pointer;
-            user-select: none;
-        }
-
         .filter-group-label {
             color: var(--fg-muted);
             font-size: 11px;
@@ -201,6 +185,84 @@
             letter-spacing: 0.6px;
             margin-right: 2px;
         }
+
+
+        /* ---- Dropdown menus (filters + expand) ---- */
+
+        .dropdown {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .dropdown-btn {
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            padding: 4px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background 120ms ease;
+        }
+
+        .dropdown-btn:hover { background: #213d6a; }
+        .dropdown.open .dropdown-btn { background: #213d6a; }
+
+        .dropdown-count {
+            color: var(--fg-muted);
+            font-size: 11px;
+        }
+
+        .dropdown-chevron {
+            color: var(--fg-muted);
+            font-size: 10px;
+            margin-left: 2px;
+        }
+
+        .dropdown-panel {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            background: var(--bg-deep);
+            border: 1px solid var(--border);
+            border-radius: 5px;
+            padding: 10px 12px;
+            min-width: 170px;
+            z-index: 200;
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .dropdown-panel label {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+            cursor: pointer;
+            user-select: none;
+            font-size: 13px;
+        }
+
+        .dropdown-action {
+            background: transparent;
+            border: none;
+            color: var(--fg);
+            text-align: left;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            transition: background 120ms ease;
+        }
+
+        .dropdown-action:hover { background: rgba(255, 255, 255, 0.07); }
 
         .swatch {
             display: inline-block;
@@ -689,42 +751,66 @@
             </select>
         </div>
 
-        <div class="type-toggles">
-            <span class="filter-group-label">Type</span>
-            <label>
-                <input type="checkbox" data-type="benefit" checked>
-                <span class="swatch benefit"></span>
-                Benefit
-            </label>
-            <label>
-                <input type="checkbox" data-type="product" checked>
-                <span class="swatch product"></span>
-                Product
-            </label>
-            <label>
-                <input type="checkbox" data-type="milestone" checked>
-                <span class="swatch milestone"></span>
-                Milestone
-            </label>
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
+                Type
+                <span class="dropdown-count" id="type-count">3/3</span>
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel type-toggles" hidden>
+                <label>
+                    <input type="checkbox" data-type="benefit" checked>
+                    <span class="swatch benefit"></span>
+                    Benefit
+                </label>
+                <label>
+                    <input type="checkbox" data-type="product" checked>
+                    <span class="swatch product"></span>
+                    Product
+                </label>
+                <label>
+                    <input type="checkbox" data-type="milestone" checked>
+                    <span class="swatch milestone"></span>
+                    Milestone
+                </label>
+            </div>
         </div>
 
-        <div class="conf-toggles">
-            <span class="filter-group-label">Confidence</span>
-            <label>
-                <input type="checkbox" data-conf="h" checked>
-                <span class="swatch high"></span>
-                High
-            </label>
-            <label>
-                <input type="checkbox" data-conf="m" checked>
-                <span class="swatch medium"></span>
-                Medium
-            </label>
-            <label>
-                <input type="checkbox" data-conf="l" checked>
-                <span class="swatch low"></span>
-                Low
-            </label>
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
+                Confidence
+                <span class="dropdown-count" id="conf-count">3/3</span>
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel conf-toggles" hidden>
+                <label>
+                    <input type="checkbox" data-conf="h" checked>
+                    <span class="swatch high"></span>
+                    High
+                </label>
+                <label>
+                    <input type="checkbox" data-conf="m" checked>
+                    <span class="swatch medium"></span>
+                    Medium
+                </label>
+                <label>
+                    <input type="checkbox" data-conf="l" checked>
+                    <span class="swatch low"></span>
+                    Low
+                </label>
+            </div>
+        </div>
+
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
+                Expand
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel" hidden>
+                <button type="button" class="dropdown-action" data-expand-action="expand-2">Expand to level 2</button>
+                <button type="button" class="dropdown-action" data-expand-action="expand-3">Expand to level 3</button>
+                <button type="button" class="dropdown-action" data-expand-action="collapse">Collapse all</button>
+            </div>
         </div>
 
         <div class="date-range">
@@ -1559,7 +1645,7 @@
                 + themeRunCount * LAYOUT.themeHeaderHeight
                 + visible.reduce((s, it) => {
                     let h = LAYOUT.rowHeight[it.level];
-                    if (visibleOverlays[it.id].length > 0) {
+                    if (visibleOverlays[it.id].length > 0 && state.expanded.has(it.id)) {
                         h += LAYOUT.benefitZoneHeight[it.level];
                     }
                     return s + h;
@@ -1623,7 +1709,7 @@
                 }
 
                 const barZ = sized.rowHeight[it.level];
-                const benZ = visibleOverlays[it.id].length > 0
+                const benZ = (visibleOverlays[it.id].length > 0 && state.expanded.has(it.id))
                     ? sized.benefitZoneHeight[it.level]
                     : 0;
 
@@ -1792,7 +1878,8 @@
                 const rh        = rowHTotal[it.id];
                 const indent    = (it.level - 1) * LAYOUT.labelIndent;
                 const isExp     = state.expanded.has(it.id);
-                const expand    = it.childIds.length > 0 && it.level < 3;
+                const overlaysExist = visibleOverlays[it.id].length > 0;
+                const expand    = (it.childIds.length > 0 && it.level < 3) || overlaysExist;
                 const fs        = sized.fontSize[it.level];
                 const overlays  = visibleOverlays[it.id];
 
@@ -1931,8 +2018,10 @@
 
                 // Overlay markers (benefits + single-point children)
                 // sit on top of the parent's gantt bar at the same
-                // vertical centre, with a small wrapped caption below
-                // the bar inside the overlay (caption) zone.
+                // vertical centre. Their wrapped captions live in the
+                // benefit zone below the bar and only appear when the
+                // host row is expanded; collapsed rows show the markers
+                // alone (hover still reveals full info via tooltip).
                 if (overlays.length > 0) {
 
                     const barH     = sized.barHeight[it.level];
@@ -1959,6 +2048,8 @@
                             'data-colour': colourKey(ov),
                             points: pointShapePoints(ov, cx, barCy, ovSize),
                         }));
+
+                        if (!isExp) continue;
 
                         // data-id on the foreignObject so hover/click
                         // on the label resolves to this overlay item,
@@ -2023,12 +2114,27 @@
          * ================================================================
          */
 
+        function updateFilterCounts() {
+
+            const typeBoxes = document.querySelectorAll('.type-toggles input');
+            const typeOn    = Array.from(typeBoxes).filter(b => b.checked).length;
+            document.getElementById('type-count').textContent =
+                typeOn + '/' + typeBoxes.length;
+
+            const confBoxes = document.querySelectorAll('.conf-toggles input');
+            const confOn    = Array.from(confBoxes).filter(b => b.checked).length;
+            document.getElementById('conf-count').textContent =
+                confOn + '/' + confBoxes.length;
+        }
+
+
         document.querySelectorAll('.type-toggles input').forEach(cb => {
             cb.addEventListener('change', () => {
 
                 if (cb.checked) state.typeFilter.add(cb.dataset.type);
                 else            state.typeFilter.delete(cb.dataset.type);
 
+                updateFilterCounts();
                 render();
             });
         });
@@ -2040,7 +2146,89 @@
                 if (cb.checked) state.confidenceFilter.add(cb.dataset.conf);
                 else            state.confidenceFilter.delete(cb.dataset.conf);
 
+                updateFilterCounts();
                 render();
+            });
+        });
+
+
+        // --- Dropdown menus (filters + expand) ---
+        //
+        // Clicking the trigger button toggles the panel. Clicking
+        // anywhere outside an open panel closes it. Clicks inside a
+        // panel (checkboxes, action buttons) propagate to their own
+        // handlers without closing the panel - except action buttons,
+        // which close explicitly after running.
+
+        function closeAllDropdowns() {
+            document.querySelectorAll('.dropdown.open').forEach(d => {
+                d.classList.remove('open');
+                const panel = d.querySelector('.dropdown-panel');
+                if (panel) panel.hidden = true;
+            });
+        }
+
+        document.addEventListener('click', (e) => {
+
+            const btn = e.target.closest('.dropdown-btn');
+
+            if (btn) {
+                const dropdown = btn.closest('.dropdown');
+                const wasOpen  = dropdown.classList.contains('open');
+                closeAllDropdowns();
+                if (!wasOpen) {
+                    dropdown.classList.add('open');
+                    dropdown.querySelector('.dropdown-panel').hidden = false;
+                }
+                return;
+            }
+
+            if (e.target.closest('.dropdown-panel')) return;
+
+            closeAllDropdowns();
+        });
+
+
+        function expandToLevel(maxLevel) {
+
+            state.expanded.clear();
+
+            for (const it of state.items) {
+
+                if (it.isBenefit) continue;
+
+                const expandable = (it.childIds.length > 0 && it.level < 3)
+                                || it.overlayIds.length > 0;
+                if (!expandable) continue;
+
+                // maxLevel = 2: reveal level 2 (expand level 1 rows).
+                // maxLevel = 3: reveal everything (expand all levels).
+                if (maxLevel === 2 && it.level === 1) {
+                    state.expanded.add(it.id);
+                } else if (maxLevel >= 3) {
+                    state.expanded.add(it.id);
+                }
+            }
+
+            render();
+        }
+
+
+        document.querySelectorAll('[data-expand-action]').forEach(btn => {
+            btn.addEventListener('click', () => {
+
+                const action = btn.dataset.expandAction;
+
+                if (action === 'expand-2') {
+                    expandToLevel(2);
+                } else if (action === 'expand-3') {
+                    expandToLevel(3);
+                } else if (action === 'collapse') {
+                    state.expanded.clear();
+                    render();
+                }
+
+                closeAllDropdowns();
             });
         });
 
