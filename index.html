@@ -27,14 +27,14 @@
             --fg-muted:    #a8b5d1;
             --fg-dim:      #6a85ba;
 
-            --benefit:     #3ec7c9;
-            --product:     #f0b429;
-            --milestone:   #ff6b6b;
+            /* Activity bars and milestone diamonds share a single default
+               colour. Benefit stars are coloured by Impact (1-3). */
+            --bar-default: #f0b429;
+            --impact-1:    #4aa3ff;
+            --impact-2:    #4ec97a;
+            --impact-3:    #f4d35e;
 
-            --high:        #4ec97a;
-            --medium:      #f4d35e;
-            --low:         #ee5253;
-            --unknown:     #6a85ba;
+            --warn:        #e63946;
         }
 
 
@@ -270,39 +270,66 @@
             height: 12px;
             border-radius: 3px;
         }
-        .swatch.diamond { border-radius: 0; transform: rotate(45deg); }
 
-        .swatch.benefit   { background: var(--benefit);   }
-        .swatch.product   { background: var(--product);   }
-        .swatch.milestone { background: var(--milestone); }
-        .swatch.high      { background: var(--high);      }
-        .swatch.medium    { background: var(--medium);    }
-        .swatch.low       { background: var(--low);       }
+        .swatch.impact-1 { background: var(--impact-1); }
+        .swatch.impact-2 { background: var(--impact-2); }
+        .swatch.impact-3 { background: var(--impact-3); }
 
 
-        .colour-mode {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .colour-mode label {
+        /* Two-level filter list inside a dropdown: LOE header lines
+           sit above their themes, themes indent under them. */
+        .dropdown-section {
+            margin-top: 4px;
             color: var(--fg-muted);
             font-size: 11px;
             text-transform: uppercase;
-            letter-spacing: 0.6px;
+            letter-spacing: 0.5px;
         }
+        .dropdown-section:first-child { margin-top: 0; }
+        .dropdown-panel.indent label { padding-left: 14px; }
 
-        #colour-by {
-            background: var(--bg-input);
-            border: 1px solid var(--border);
-            color: var(--fg);
+
+        /* Data-warning indicator in the toolbar. Hidden until at least
+           one warning exists, then highlights the broken rows so users
+           can find and fix them. */
+        .warn-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(230, 57, 70, 0.18);
+            border: 1px solid var(--warn);
+            color: var(--warn);
             border-radius: 4px;
-            padding: 4px 24px 4px 8px;
+            padding: 4px 10px;
             font-size: 13px;
             font-family: inherit;
             cursor: pointer;
         }
+        .warn-indicator:hover { background: rgba(230, 57, 70, 0.30); }
+        .warn-icon { font-weight: 700; }
+
+        .warn-panel {
+            max-width: 420px;
+            max-height: 50vh;
+            overflow-y: auto;
+            color: var(--fg);
+        }
+        .warn-panel h4 {
+            margin: 6px 0 4px;
+            color: var(--warn);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .warn-panel h4:first-child { margin-top: 0; }
+        .warn-row {
+            font-size: 12px;
+            color: var(--fg);
+            padding: 2px 0;
+            line-height: 1.4;
+        }
+        .warn-row .warn-id { color: var(--fg-muted); font-family: ui-monospace, monospace; }
+        .warn-row .warn-reason { color: var(--fg-muted); }
 
 
         .date-range {
@@ -395,12 +422,22 @@
             fill: var(--fg);
         }
 
-        .theme-label {
-            font-size: 15px;
+        .loe-label {
+            font-size: 18px;
             font-weight: 700;
-            letter-spacing: 2px;
+            letter-spacing: 2.5px;
             text-transform: uppercase;
             fill: var(--fg);
+            cursor: default;
+        }
+
+        .theme-label {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 1.6px;
+            text-transform: uppercase;
+            fill: var(--fg-muted);
+            cursor: default;
         }
 
         .row              { cursor: default; }
@@ -454,22 +491,17 @@
                 transform 140ms ease;
             transform-box: fill-box;
             transform-origin: center;
-            fill: var(--unknown);
+            fill: var(--bar-default);
         }
 
         /*
-         * Fill colours are driven by data-colour on each individual
-         * bar / marker so we can switch the entire chart between
-         * "Colour by type" and "Colour by confidence" without
-         * re-classing every row.
+         * Activities and milestones use the default bar colour;
+         * benefit stars are coloured by Impact (1-3).
          */
-        [data-colour="benefit"]   { fill: var(--benefit);   }
-        [data-colour="product"]   { fill: var(--product);   }
-        [data-colour="milestone"] { fill: var(--milestone); }
-        [data-colour="high"]      { fill: var(--high);      }
-        [data-colour="medium"]    { fill: var(--medium);    }
-        [data-colour="low"]       { fill: var(--low);       }
-        [data-colour="unknown"]   { fill: var(--unknown);   }
+        [data-colour="default"]  { fill: var(--bar-default); }
+        [data-colour="impact-1"] { fill: var(--impact-1); }
+        [data-colour="impact-2"] { fill: var(--impact-2); }
+        [data-colour="impact-3"] { fill: var(--impact-3); }
 
 
         /* Benefit children (b-level) plotted in the parent's row */
@@ -512,39 +544,6 @@
             overflow-wrap: anywhere;
         }
 
-
-        /*
-         * "More info" toggle lines in the left header column, one
-         * per child-bearing point-overlay. The whole line is a
-         * hit-target so clicks anywhere on it expand/collapse the
-         * overlay's grandchild rows.
-         */
-        .more-info-toggle { cursor: pointer; }
-        .more-info-bg     { fill: transparent; transition: fill 120ms ease; }
-        .more-info-toggle:hover .more-info-bg { fill: rgba(255, 255, 255, 0.05); }
-
-        .more-info-label {
-            color: var(--fg-muted);
-            font-family: inherit;
-            font-style: italic;
-            overflow: hidden;
-            white-space: nowrap;
-            text-overflow: ellipsis;
-            user-select: none;
-            pointer-events: none;
-            transition: color 120ms ease;
-        }
-        .more-info-toggle:hover .more-info-label { color: var(--fg); }
-        .more-info-toggle.expanded .more-info-label { color: var(--fg); }
-
-        /*
-         * The end-marker on a type=benefit numbered range row sits at
-         * the right edge of the gantt block.
-         */
-        .end-marker {
-            stroke: rgba(255, 255, 255, 0.85);
-            stroke-width: 1.25;
-        }
 
         .bar:hover, .marker:hover {
             filter: brightness(1.18) url(#hover-glow);
@@ -615,6 +614,88 @@
                     text-transform: uppercase; letter-spacing: 0.5px; }
         .tt-date  { color: #c8d3e8; margin-top: 6px; }
         .tt-desc  { margin-top: 8px; color: var(--fg); white-space: pre-wrap; }
+        .tt-fields { margin-top: 8px; display: grid; grid-template-columns: auto 1fr;
+                     gap: 2px 10px; font-size: 12px; color: var(--fg); }
+        .tt-fields dt { color: var(--fg-muted); }
+        .tt-fields dd { margin: 0; }
+        .tt-id    { color: var(--fg-dim); font-size: 11px; margin-top: 6px;
+                    font-family: ui-monospace, monospace; }
+
+        /* Milestone tooltip's second stage: the risks list. Hidden by
+           default; revealed via .expanded (set after a 600ms hold or on
+           click). */
+        .tt-risks { display: none; margin-top: 10px; padding-top: 8px;
+                    border-top: 1px solid var(--border); }
+        #tooltip.expanded .tt-risks { display: block; }
+        .tt-risks-hint { color: var(--fg-dim); font-size: 11px; margin-top: 6px;
+                         font-style: italic; }
+        #tooltip.expanded .tt-risks-hint { display: none; }
+        .tt-risk-row { margin-top: 6px; }
+        .tt-risk-row:first-child { margin-top: 0; }
+        .tt-risk-title { font-weight: 600; font-size: 12px; display: flex;
+                         align-items: center; gap: 6px; }
+        .tt-risk-meta { color: var(--fg-muted); font-size: 11px; margin-top: 1px; }
+        .rag-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                   border: 1px solid rgba(255, 255, 255, 0.4); flex-shrink: 0; }
+        .rag-dot.rag-r { background: #ee5253; }
+        .rag-dot.rag-a { background: #f4d35e; }
+        .rag-dot.rag-g { background: #4ec97a; }
+        .rag-dot.rag-unknown { background: var(--fg-dim); }
+
+
+        /* ---- Sheet picker grid ---- */
+
+        #sheet-picker { max-width: 540px; }
+        #sheet-picker .card-intro {
+            margin: 0 0 18px 0;
+            color: var(--fg-muted);
+            line-height: 1.5;
+        }
+
+        .sheet-picker-grid {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4px;
+        }
+        .sheet-picker-grid th,
+        .sheet-picker-grid td {
+            padding: 6px 8px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        .sheet-picker-grid thead th {
+            color: var(--fg-muted);
+            font-size: 11px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+        .sheet-picker-grid tbody th {
+            font-weight: 500;
+            color: var(--fg);
+            width: 110px;
+        }
+        .sheet-picker-grid select {
+            width: 100%;
+            padding: 6px 8px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        .sheet-picker-grid input[type="number"] {
+            width: 64px;
+            padding: 6px 8px;
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: inherit;
+        }
 
         [hidden] { display: none !important; }
 
@@ -712,17 +793,12 @@
         <input type="file" id="excel-file" accept=".xlsx,.xls,.xlsm">
 
         <div class="hint">
-            Expected columns: <code>theme</code>, <code>title</code>,
-            <code>start</code>, <code>end</code>, <code>description</code>,
-            <code>level</code> (1-3 or <code>b</code>), <code>type</code>
-            (benefit / product / milestone), <code>confidence</code>
-            (h / m / l - optional).
-            <br><br>
-            Benefits (<code>type = benefit</code> or
-            <code>level = b</code>) are drawn as stars, everything else
-            as diamonds when shown as a point. Any sub-row with
-            <code>start = end</code> overlays its parent's gantt bar
-            instead of taking its own row.
+            The workbook is expected to contain six sheets:
+            <code>LOEs</code>, <code>Themes</code>,
+            <code>Activities</code>, <code>Milestones</code>,
+            <code>Benefits</code>, <code>Risks</code> - linked together
+            by ID columns. After the file is loaded you'll be asked to
+            confirm which sheet corresponds to each kind.
         </div>
 
     </div>
@@ -730,28 +806,53 @@
 
     <!--
         ============================================================
-        Sheet picker - choose sheet + top-left cell of the data.
+        Sheet picker - map each of the six expected sheets to a sheet
+        in the workbook, with a per-sheet header-row skip count.
+        The header row itself must be the first row of the chosen
+        sheet (assumed at A1).
         ============================================================
     -->
     <div id="sheet-picker" class="card" hidden>
 
-        <h2>Choose sheet and data location</h2>
+        <h2>Match workbook sheets</h2>
 
-        <label for="sheet-select">Sheet</label>
-        <select id="sheet-select"></select>
+        <p class="card-intro">
+            For each kind below, pick the sheet that holds it. The first
+            row of each chosen sheet must contain the column names. Use
+            "Skip" if extra header rows sit between the column-name row
+            and the data.
+        </p>
 
-        <label for="topleft-input">Top-left cell of the data table</label>
-        <input id="topleft-input" type="text" value="A1" spellcheck="false">
-
-        <label for="skip-header-input">Extra header rows to skip below the header</label>
-        <input id="skip-header-input" type="number" min="0" step="1" value="0">
+        <table class="sheet-picker-grid">
+            <thead>
+                <tr><th>Kind</th><th>Sheet</th><th>Skip</th></tr>
+            </thead>
+            <tbody>
+                <tr><th>LOEs</th>
+                    <td><select class="sheet-picker-select" data-kind="loes"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="loes" min="0" step="1" value="0"></td></tr>
+                <tr><th>Themes</th>
+                    <td><select class="sheet-picker-select" data-kind="themes"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="themes" min="0" step="1" value="0"></td></tr>
+                <tr><th>Activities</th>
+                    <td><select class="sheet-picker-select" data-kind="activities"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="activities" min="0" step="1" value="0"></td></tr>
+                <tr><th>Milestones</th>
+                    <td><select class="sheet-picker-select" data-kind="milestones"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="milestones" min="0" step="1" value="0"></td></tr>
+                <tr><th>Benefits</th>
+                    <td><select class="sheet-picker-select" data-kind="benefits"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="benefits" min="0" step="1" value="0"></td></tr>
+                <tr><th>Risks</th>
+                    <td><select class="sheet-picker-select" data-kind="risks"></select></td>
+                    <td><input type="number" class="sheet-picker-skip" data-kind="risks" min="0" step="1" value="0"></td></tr>
+            </tbody>
+        </table>
 
         <div class="hint">
-            "Top-left cell" should point at the row containing the
-            column names. If your sheet has additional header rows
-            below that (sub-headers, column descriptions, etc.) set
-            the "extra header rows" count so those rows are skipped
-            before the data begins.
+            Sheets with names matching the kind (e.g. a sheet called
+            "Activities" or "activity log") are pre-selected
+            automatically. You can override any of them.
         </div>
 
         <button id="load-btn">Load</button>
@@ -768,62 +869,22 @@
 
         <span class="brand">Roadmap Visualiser</span>
 
-        <div class="colour-mode">
-            <label for="colour-by">Colour by</label>
-            <select id="colour-by">
-                <option value="type">Type</option>
-                <option value="confidence">Confidence</option>
-            </select>
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
+                LOEs
+                <span class="dropdown-count" id="loe-count">0/0</span>
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel loe-toggles" hidden></div>
         </div>
 
         <div class="dropdown">
             <button type="button" class="dropdown-btn">
-                Type
-                <span class="dropdown-count" id="type-count">3/3</span>
+                Themes
+                <span class="dropdown-count" id="theme-count">0/0</span>
                 <span class="dropdown-chevron">&#9662;</span>
             </button>
-            <div class="dropdown-panel type-toggles" hidden>
-                <label>
-                    <input type="checkbox" data-type="benefit" checked>
-                    <span class="swatch benefit"></span>
-                    Benefit
-                </label>
-                <label>
-                    <input type="checkbox" data-type="product" checked>
-                    <span class="swatch product"></span>
-                    Product
-                </label>
-                <label>
-                    <input type="checkbox" data-type="milestone" checked>
-                    <span class="swatch milestone"></span>
-                    Milestone
-                </label>
-            </div>
-        </div>
-
-        <div class="dropdown">
-            <button type="button" class="dropdown-btn">
-                Confidence
-                <span class="dropdown-count" id="conf-count">3/3</span>
-                <span class="dropdown-chevron">&#9662;</span>
-            </button>
-            <div class="dropdown-panel conf-toggles" hidden>
-                <label>
-                    <input type="checkbox" data-conf="h" checked>
-                    <span class="swatch high"></span>
-                    High
-                </label>
-                <label>
-                    <input type="checkbox" data-conf="m" checked>
-                    <span class="swatch medium"></span>
-                    Medium
-                </label>
-                <label>
-                    <input type="checkbox" data-conf="l" checked>
-                    <span class="swatch low"></span>
-                    Low
-                </label>
-            </div>
+            <div class="dropdown-panel theme-toggles" hidden></div>
         </div>
 
         <div class="dropdown">
@@ -844,6 +905,14 @@
             <span class="dash">&ndash;</span>
             <input type="month" id="date-end" aria-label="End month">
             <a href="#" id="date-reset" class="clear" title="Reset date range to the full data extent">show all</a>
+        </div>
+
+        <div class="dropdown" id="warn-dropdown" hidden>
+            <button type="button" class="warn-indicator dropdown-btn" title="Data issues found">
+                <span class="warn-icon">&#9888;</span>
+                <span id="warn-count">0</span>
+            </button>
+            <div class="dropdown-panel warn-panel" hidden></div>
         </div>
 
         <div class="toolbar-links">
@@ -892,14 +961,45 @@
          * ================================================================
          */
 
+        const SHEET_KINDS = ['loes', 'themes', 'activities', 'milestones', 'benefits', 'risks'];
+
+        const UNASSIGNED_LOE_ID      = '__unassigned_loe__';
+        const UNASSIGNED_THEME_ID    = '__unassigned_theme__';
+        const UNASSIGNED_ACTIVITY_ID = '__unassigned_activity__';
+
         const state = {
             workbook:         null,
-            items:            [],
-            byId:             {},
+
+            // Per-kind sheet picks: { loes: { name, skip }, ... }
+            picks:            null,
+
+            // Raw parsed sheets.
+            loes:             [],
+            themes:           [],
+            activities:       [],
+            milestones:       [],
+            benefits:         [],
+            risks:            [],
+
+            // Lookups by id.
+            loeById:          {},
+            themeById:        {},
+            activityById:     {},
+            milestoneById:    {},
+
+            // Derived groupings used by the renderer.
+            themesByLoe:          {},   // loeId -> [theme]
+            activitiesByTheme:    {},   // themeId -> [activity] in sheet order
+            milestonesByActivity: {},   // activityId -> [milestone]
+            benefitsByActivity:   {},   // activityId -> [benefit] (via milestone)
+            risksByMilestone:     {},   // milestoneId -> [risk]
+
+            // Activities whose own row is expanded to reveal children.
             expanded:         new Set(),
-            typeFilter:       new Set(['benefit', 'product', 'milestone']),
-            confidenceFilter: new Set(['h', 'm', 'l']),
-            colourBy:         'type',     // 'type' or 'confidence'
+
+            // Filter sets - checked LOE / Theme ids.
+            loeFilter:        new Set(),
+            themeFilter:      new Set(),
 
             // Date-range filter: first-of-month Dates, or null when
             // the data has no usable dates at all. They default to the
@@ -909,6 +1009,11 @@
             dateEnd:          null,
             dataDateMin:      null,
             dataDateMax:      null,
+
+            // Collected during link/parent-inference so the toolbar can
+            // surface broken rows back to the user instead of silently
+            // dropping them. Each entry: { sheet, rowId, rowTitle, reason }.
+            dataWarnings:     [],
         };
 
 
@@ -916,8 +1021,9 @@
 
         const LAYOUT = {
 
-            // Single column on the left for row titles. Themes get their
-            // own header row stacked above the rows that belong to them.
+            // Single column on the left for row titles. LOEs and Themes
+            // both get their own header rows stacked above the rows that
+            // belong to them.
             marginLeft:    500,
             marginRight:   40,
             minMonthWidth: 64,
@@ -936,9 +1042,12 @@
             labelRightPad:  16,    // gap between label area and gantt
             labelIndent:    24,    // indent added per nested level
 
-            // Vertical space reserved above each theme's rows for the
-            // theme heading (at scale = 1).
-            themeHeaderHeight: 38,
+            // Vertical space reserved above each LOE / theme's rows.
+            loeHeaderHeight:   44,
+            themeHeaderHeight: 32,
+
+            loeFontSize:       18,
+            themeFontSize:     14,
 
             // Sized to fit two lines of wrapped label text comfortably
             // at the matching fontSize/lineHeight (1.18).
@@ -947,20 +1056,13 @@
             fontSize:   { 1: 17, 2: 14, 3: 11 },
 
             // Extra vertical space appended to a row when it has any
-            // visible benefit-children. The benefit diamonds themselves
-            // sit on top of the parent's gantt bar, so this zone only
-            // needs to fit the wrapped 2-line caption beneath the bar.
-            benefitZoneHeight:  { 1: 28, 2: 26, 3: 22 },
-            benefitDiamondSize: { 1: 8,  2: 6,  3: 5  },
-            benefitFontSize:    { 1: 11, 2: 10, 3: 9  },
-
-            // One line per child-bearing point-overlay (a level n+1
-            // point-milestone whose own level n+2 sub-rows would
-            // otherwise be unreachable). Drawn in the left header
-            // column underneath the diamond-label zone, with a
-            // triangle that toggles the children's visibility.
-            moreInfoLineHeight: { 1: 22, 2: 20, 3: 18 },
-            moreInfoFontSize:   { 1: 12, 2: 11, 3: 10 },
+            // overlay markers (milestone diamonds + benefit stars). The
+            // markers themselves sit on top of the parent's gantt bar,
+            // so this zone only needs to fit the wrapped 2-line caption
+            // beneath the bar.
+            overlayZoneHeight:  { 1: 28, 2: 26, 3: 22 },
+            overlayMarkerSize:  { 1: 8,  2: 6,  3: 5  },
+            overlayFontSize:    { 1: 11, 2: 10, 3: 9  },
 
             // Auto-fit floor: the chart will not scale rows below this
             // fraction of their natural height even if content exceeds
@@ -1025,16 +1127,99 @@
          * ================================================================
          */
 
+        // Case-insensitive substring tests used to pre-select a workbook
+        // sheet for each of the six expected kinds. The first list that
+        // matches wins; ties are broken by preferring the closest match
+        // (shorter sheet names score higher).
+        const SHEET_NAME_HINTS = {
+            loes:       ['loe', 'line of effort', 'lines of effort'],
+            themes:     ['theme'],
+            activities: ['activit'],
+            milestones: ['mileston'],
+            benefits:   ['benefit'],
+            risks:      ['risk'],
+        };
+
+
+        function preselectSheets(sheetNames, previousPicks) {
+
+            // For each kind, score every sheet by hint match. Pick the
+            // best unique match per kind, falling back to "" if nothing
+            // matches. previousPicks (if set) wins over the heuristic so
+            // re-opening the picker preserves user choices.
+            const picks = {};
+            const taken = new Set();
+
+            for (const kind of SHEET_KINDS) {
+
+                if (previousPicks && previousPicks[kind] && previousPicks[kind].name
+                    && sheetNames.includes(previousPicks[kind].name)) {
+                    picks[kind] = previousPicks[kind].name;
+                    continue;
+                }
+
+                let best = '';
+                let bestScore = -1;
+
+                for (const name of sheetNames) {
+
+                    if (taken.has(name)) continue;
+
+                    const lower = name.toLowerCase();
+                    let score = -1;
+
+                    for (const hint of SHEET_NAME_HINTS[kind]) {
+                        if (lower === hint)                    { score = Math.max(score, 100); }
+                        else if (lower.includes(hint))         { score = Math.max(score, 50 - lower.length); }
+                    }
+
+                    if (score > bestScore) { bestScore = score; best = name; }
+                }
+
+                picks[kind] = best;
+                if (best) taken.add(best);
+            }
+
+            return picks;
+        }
+
+
         function openSheetPicker() {
 
-            const select = document.getElementById('sheet-select');
-            select.innerHTML = '';
+            const sheetNames = state.workbook.SheetNames;
+            const preselect  = preselectSheets(sheetNames, state.picks);
 
-            for (const name of state.workbook.SheetNames) {
-                const opt = document.createElement('option');
-                opt.value       = name;
-                opt.textContent = name;
-                select.appendChild(opt);
+            // Read previous skip-row counts so re-opens preserve them.
+            const prevSkips = {};
+            for (const kind of SHEET_KINDS) {
+                if (state.picks && state.picks[kind]) {
+                    prevSkips[kind] = state.picks[kind].skip;
+                }
+            }
+
+            for (const sel of document.querySelectorAll('.sheet-picker-select')) {
+
+                const kind = sel.dataset.kind;
+                sel.innerHTML = '';
+
+                const none = document.createElement('option');
+                none.value       = '';
+                none.textContent = '- none -';
+                sel.appendChild(none);
+
+                for (const name of sheetNames) {
+                    const opt = document.createElement('option');
+                    opt.value       = name;
+                    opt.textContent = name;
+                    sel.appendChild(opt);
+                }
+
+                sel.value = preselect[kind] || '';
+            }
+
+            for (const inp of document.querySelectorAll('.sheet-picker-skip')) {
+                const kind = inp.dataset.kind;
+                inp.value = (prevSkips[kind] != null) ? prevSkips[kind] : 0;
             }
 
             document.getElementById('upload-card').hidden  = true;
@@ -1042,6 +1227,34 @@
             document.getElementById('chart-wrap').hidden   = true;
             document.body.classList.remove('chart-visible');
             document.getElementById('sheet-picker').hidden = false;
+        }
+
+
+        function resetLoadedData() {
+            state.picks                = null;
+            state.loes                 = [];
+            state.themes               = [];
+            state.activities           = [];
+            state.milestones           = [];
+            state.benefits             = [];
+            state.risks                = [];
+            state.loeById              = {};
+            state.themeById            = {};
+            state.activityById         = {};
+            state.milestoneById        = {};
+            state.themesByLoe          = {};
+            state.activitiesByTheme    = {};
+            state.milestonesByActivity = {};
+            state.benefitsByActivity   = {};
+            state.risksByMilestone     = {};
+            state.expanded             = new Set();
+            state.loeFilter            = new Set();
+            state.themeFilter          = new Set();
+            state.dateStart            = null;
+            state.dateEnd              = null;
+            state.dataDateMin          = null;
+            state.dataDateMax          = null;
+            state.dataWarnings         = [];
         }
 
 
@@ -1053,13 +1266,7 @@
             // gets stuck on the upload screen).
             document.getElementById('excel-file').value    = '';
 
-            state.items       = [];
-            state.byId        = {};
-            state.expanded    = new Set();
-            state.dateStart   = null;
-            state.dateEnd     = null;
-            state.dataDateMin = null;
-            state.dataDateMax = null;
+            resetLoadedData();
             document.getElementById('date-start').value = '';
             document.getElementById('date-end').value   = '';
 
@@ -1094,23 +1301,37 @@
 
         document.getElementById('load-btn').addEventListener('click', () => {
 
-            const sheetName = document.getElementById('sheet-select').value;
-            const topLeft   = (document.getElementById('topleft-input').value || 'A1').trim();
-            const skipRaw   = document.getElementById('skip-header-input').value;
-            const skipRows  = Math.max(0, parseInt(skipRaw, 10) || 0);
-            const sheet     = state.workbook.Sheets[sheetName];
+            const picks = {};
+
+            for (const sel of document.querySelectorAll('.sheet-picker-select')) {
+                picks[sel.dataset.kind] = { name: sel.value, skip: 0 };
+            }
+
+            for (const inp of document.querySelectorAll('.sheet-picker-skip')) {
+                const kind = inp.dataset.kind;
+                picks[kind].skip = Math.max(0, parseInt(inp.value, 10) || 0);
+            }
+
+            const missing = SHEET_KINDS.filter(k => !picks[k].name);
+            if (missing.length > 0) {
+                alert('Please choose a sheet for: ' + missing.join(', '));
+                return;
+            }
 
             try {
-                loadData(sheet, topLeft, skipRows);
+                loadWorkbook(picks);
             } catch (err) {
                 alert('Could not load data: ' + err.message);
                 return;
             }
 
             // Populate the toolbar's date inputs with the data extent
-            // (set in loadData) so they always show a usable default.
+            // (set in loadWorkbook) so they always show a usable default.
             document.getElementById('date-start').value = formatMonthInput(state.dataDateMin);
             document.getElementById('date-end').value   = formatMonthInput(state.dataDateMax);
+
+            rebuildFilterDropdowns();
+            updateWarningIndicator();
 
             document.getElementById('sheet-picker').hidden = true;
             document.getElementById('toolbar').hidden      = false;
@@ -1136,263 +1357,513 @@
 
 
         /* ================================================================
-         * Section 4: cell-reference parsing & data extraction
+         * Section 4: per-sheet parsers, linking & parent inference
          * ================================================================
          */
 
-        function parseCellRef(ref) {
-
-            const m = /^([A-Za-z]+)(\d+)$/.exec(String(ref).trim());
-            if (!m) throw new Error('Invalid cell reference: ' + ref);
-
-            let col = 0;
-            for (const ch of m[1].toUpperCase()) {
-                col = col * 26 + (ch.charCodeAt(0) - 64);
-            }
-
-            return {
-                c: col - 1,
-                r: parseInt(m[2], 10) - 1,
-            };
-        }
-
-
-        const HEADER_ALIASES = {
-            theme:       ['theme'],
-            title:       ['title', 'name'],
-            start:       ['start', 'start date', 'from'],
-            end:         ['end', 'end date', 'to'],
-            description: ['description', 'summary', 'summary description', 'notes'],
-            level:       ['level'],
-            type:        ['type', 'category'],
-            confidence:  ['confidence', 'delivery confidence', 'conf'],
+        // Header aliases per sheet kind. The first column name that
+        // matches (case-insensitive, trimmed) wins; missing columns
+        // fall back to positional order.
+        const SHEET_ALIASES = {
+            loes: {
+                id:          ['loe id', 'id'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+            },
+            themes: {
+                loeId:       ['loe id'],
+                id:          ['theme id', 'id'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+            },
+            activities: {
+                themeId:     ['theme id'],
+                id:          ['activity id', 'id'],
+                level:       ['level'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+                start:       ['start date', 'start', 'from'],
+                end:         ['end date', 'end', 'to'],
+            },
+            milestones: {
+                activityId:  ['activity id'],
+                id:          ['milestone id', 'id'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+                date:        ['date'],
+                owner:       ['owner'],
+                priority:    ['priority'],
+                confidence:  ['confidence', 'conf'],
+                progress:    ['progress', '%', 'percent complete'],
+            },
+            benefits: {
+                milestoneId: ['milestone id'],
+                id:          ['benefit id', 'id'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+                measure:     ['measure'],
+                date:        ['date'],
+                beneficiary: ['beneficiary'],
+                confidence:  ['confidence', 'conf'],
+                impact:      ['impact'],
+            },
+            risks: {
+                milestoneId: ['milestone id'],
+                id:          ['risk id', 'id'],
+                title:       ['title', 'name'],
+                description: ['description', 'summary', 'notes'],
+                owner:       ['owner'],
+                rag:         ['rag', 'status'],
+                confidence:  ['confidence', 'conf'],
+                level:       ['level'],
+            },
         };
 
 
-        const KNOWN_TYPES = ['benefit', 'product', 'milestone'];
-        const KNOWN_CONFS = ['h', 'm', 'l'];
+        // Normalise a confidence cell to 'h'/'m'/'l' or null.
+        function normaliseConfidence(raw) {
+            let s = String(raw != null ? raw : '').trim().toLowerCase();
+            if (s === 'high')                          return 'h';
+            if (s === 'medium' || s === 'med')         return 'm';
+            if (s === 'low')                           return 'l';
+            if (s === 'h' || s === 'm' || s === 'l')   return s;
+            return null;
+        }
 
 
-        function loadData(sheet, topLeftRef, skipHeaderRows) {
+        // Normalise a RAG cell to 'r'/'a'/'g' or null.
+        function normaliseRag(raw) {
+            let s = String(raw != null ? raw : '').trim().toLowerCase();
+            if (s.startsWith('r'))                     return 'r';
+            if (s.startsWith('a') || s.startsWith('y')) return 'a';
+            if (s.startsWith('g'))                     return 'g';
+            return null;
+        }
 
-            if (!sheet || !sheet['!ref']) {
-                throw new Error('Sheet is empty.');
-            }
+
+        // Normalise an impact cell to 1, 2 or 3 (defaults to 3).
+        function normaliseImpact(raw) {
+            const n = parseInt(raw, 10);
+            if (n === 1 || n === 2 || n === 3) return n;
+            return 3;
+        }
+
+
+        // Run a workbook sheet through a per-kind alias map. Returns
+        // an array of plain objects produced by `rowMapper(row, ci, i)`.
+        // Returns [] if the sheet is empty.
+        function parseSheet(sheet, aliasMap, skipHeaderRows, rowMapper) {
+
+            if (!sheet || !sheet['!ref']) return [];
 
             skipHeaderRows = Math.max(0, skipHeaderRows | 0);
 
-            const topLeft = parseCellRef(topLeftRef);
-
-            const fullRange = XLSX.utils.decode_range(sheet['!ref']);
-
-            if (topLeft.r < fullRange.s.r || topLeft.c < fullRange.s.c
-             || topLeft.r > fullRange.e.r || topLeft.c > fullRange.e.c) {
-                throw new Error(
-                    'Top-left cell ' + topLeftRef + ' is outside the populated range.'
-                );
-            }
-
-            const subRange = {
-                s: { r: topLeft.r, c: topLeft.c },
-                e: { r: fullRange.e.r, c: fullRange.e.c },
-            };
-
             const rows = XLSX.utils.sheet_to_json(sheet, {
                 header: 1,
-                range:  XLSX.utils.encode_range(subRange),
                 defval: null,
                 raw:    true,
             });
 
-            // Need at least: 1 header + skipHeaderRows extras + 1 data row.
-            if (rows.length < 2 + skipHeaderRows) {
-                throw new Error('No data rows found below the header.');
-            }
+            if (rows.length < 2 + skipHeaderRows) return [];
 
             const headerRow = rows[0].map(v => v == null ? '' : String(v).trim().toLowerCase());
 
+            const ci = {};
+            const fields = Object.keys(aliasMap);
+            for (const field of fields) {
+                ci[field] = headerRow.findIndex(h => aliasMap[field].includes(h));
+            }
+
+            // Positional fallback for any unrecognised header.
+            for (let i = 0; i < fields.length; i++) {
+                if (ci[fields[i]] === -1 && i < headerRow.length) {
+                    ci[fields[i]] = i;
+                }
+            }
+
+            const out = [];
             const firstDataRow = 1 + skipHeaderRows;
 
-            const columnIndex = {};
-            for (const [field, aliases] of Object.entries(HEADER_ALIASES)) {
-                columnIndex[field] = headerRow.findIndex(h => aliases.includes(h));
-            }
-
-            // Fallback to positional order for any header we didn't recognise.
-            const positional = ['theme', 'title', 'start', 'end', 'description', 'level', 'type', 'confidence'];
-            for (let i = 0; i < positional.length; i++) {
-                if (columnIndex[positional[i]] === -1 && i < headerRow.length) {
-                    columnIndex[positional[i]] = i;
-                }
-            }
-
-            const items = [];
-
             for (let i = firstDataRow; i < rows.length; i++) {
+                const row = rows[i];
+                if (row == null) continue;
 
-                const row   = rows[i];
-                const title = row[columnIndex.title];
+                // Cells are null if empty; check title + id below.
+                const mapped = rowMapper(row, ci, i);
+                if (mapped) out.push(mapped);
+            }
 
-                if (title == null || String(title).trim() === '') continue;
+            return out;
+        }
 
-                const start = parseMonthYear(row[columnIndex.start]);
-                const end   = parseMonthYear(row[columnIndex.end]) || start;
 
-                // level can be 1-3 or "b" (this row is a benefit
-                // attached to the previous non-benefit row).
-                const levelRaw = String(row[columnIndex.level] || '').trim().toLowerCase();
-                let level = null;
-                let isBenefit = false;
+        function cellStr(row, idx) {
+            if (idx < 0) return '';
+            const v = row[idx];
+            return v == null ? '' : String(v).trim();
+        }
 
-                if (levelRaw === 'b') {
-                    isBenefit = true;
-                    // Level is inherited from the parent during the
-                    // parent-inference pass below; benefits aren't
-                    // rendered as their own rows.
-                } else {
-                    level = parseInt(levelRaw, 10);
-                    if (isNaN(level) || level < 1 || level > 3) level = 1;
-                }
 
-                let type = String(row[columnIndex.type] || '').trim().toLowerCase();
-                if (!KNOWN_TYPES.includes(type)) type = 'milestone';
+        // Add a warning entry the toolbar can surface.
+        function warn(sheet, rowId, rowTitle, reason) {
+            state.dataWarnings.push({
+                sheet:    sheet,
+                rowId:    rowId    || '',
+                rowTitle: rowTitle || '',
+                reason:   reason,
+            });
+        }
 
-                let conf = String(row[columnIndex.confidence] != null
-                                ? row[columnIndex.confidence] : '').trim().toLowerCase();
-                if (conf === 'high')                          conf = 'h';
-                else if (conf === 'medium' || conf === 'med') conf = 'm';
-                else if (conf === 'low')                      conf = 'l';
-                if (!KNOWN_CONFS.includes(conf))              conf = null;
 
-                const isPoint = start != null && end != null
-                             && start.getTime() === end.getTime();
+        function loadWorkbook(picks) {
 
-                items.push({
-                    id:          'item-' + i,
-                    theme:       String(row[columnIndex.theme] || '').trim() || '(unspecified)',
-                    title:       String(title).trim(),
-                    description: String(row[columnIndex.description] || '').trim(),
-                    start:       start,
-                    end:         end,
-                    level:       level,
-                    isBenefit:   isBenefit,
-                    isPoint:     isPoint,
-                    type:        type,
-                    confidence:  conf,
-                    parentId:    null,
-                    childIds:    [],         // range children that get their own rows when expanded
-                    overlayIds:  [],         // benefits + point-children rendered on this row's bar
+            resetLoadedData();
+            state.picks = picks;
+
+            const sheets = {};
+            for (const kind of SHEET_KINDS) {
+                sheets[kind] = state.workbook.Sheets[picks[kind].name];
+            }
+
+
+            // ---- Parse each sheet into typed records --------------------
+
+            state.loes = parseSheet(sheets.loes, SHEET_ALIASES.loes, picks.loes.skip,
+                (row, ci) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+                    return {
+                        id, title,
+                        description: cellStr(row, ci.description),
+                    };
                 });
+
+            state.themes = parseSheet(sheets.themes, SHEET_ALIASES.themes, picks.themes.skip,
+                (row, ci) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+                    return {
+                        id,
+                        loeId:       cellStr(row, ci.loeId),
+                        title,
+                        description: cellStr(row, ci.description),
+                    };
+                });
+
+            state.activities = parseSheet(sheets.activities, SHEET_ALIASES.activities, picks.activities.skip,
+                (row, ci, rowIdx) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+
+                    let level = parseInt(cellStr(row, ci.level), 10);
+                    if (isNaN(level) || level < 1 || level > 3) level = 1;
+
+                    const start = parseDate(row[ci.start]);
+                    const end   = parseDate(row[ci.end]) || start;
+
+                    return {
+                        id,
+                        themeId:     cellStr(row, ci.themeId),
+                        level,
+                        title,
+                        description: cellStr(row, ci.description),
+                        start, end,
+                        sheetRow:    rowIdx,
+
+                        // populated during link/parent inference below
+                        parentId:    null,
+                        childIds:    [],
+                    };
+                });
+
+            state.milestones = parseSheet(sheets.milestones, SHEET_ALIASES.milestones, picks.milestones.skip,
+                (row, ci) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+                    return {
+                        id,
+                        activityId:  cellStr(row, ci.activityId),
+                        title,
+                        description: cellStr(row, ci.description),
+                        date:        parseDate(row[ci.date]),
+                        owner:       cellStr(row, ci.owner),
+                        priority:    cellStr(row, ci.priority),
+                        confidence:  normaliseConfidence(row[ci.confidence]),
+                        progress:    cellStr(row, ci.progress),
+                    };
+                });
+
+            state.benefits = parseSheet(sheets.benefits, SHEET_ALIASES.benefits, picks.benefits.skip,
+                (row, ci) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+                    return {
+                        id,
+                        milestoneId: cellStr(row, ci.milestoneId),
+                        title,
+                        description: cellStr(row, ci.description),
+                        measure:     cellStr(row, ci.measure),
+                        date:        parseDate(row[ci.date]),
+                        beneficiary: cellStr(row, ci.beneficiary),
+                        confidence:  normaliseConfidence(row[ci.confidence]),
+                        impact:      normaliseImpact(row[ci.impact]),
+                    };
+                });
+
+            state.risks = parseSheet(sheets.risks, SHEET_ALIASES.risks, picks.risks.skip,
+                (row, ci) => {
+                    const id    = cellStr(row, ci.id);
+                    const title = cellStr(row, ci.title);
+                    if (!id || !title) return null;
+                    return {
+                        id,
+                        milestoneId: cellStr(row, ci.milestoneId),
+                        title,
+                        description: cellStr(row, ci.description),
+                        owner:       cellStr(row, ci.owner),
+                        rag:         normaliseRag(row[ci.rag]),
+                        confidence:  normaliseConfidence(row[ci.confidence]),
+                        level:       cellStr(row, ci.level),
+                    };
+                });
+
+
+            // ---- Build *-byId lookups (dedupe + warn on collisions) ----
+
+            function indexBy(records, sheet) {
+                const out = {};
+                for (const r of records) {
+                    if (out[r.id]) {
+                        warn(sheet, r.id, r.title, 'duplicate id - keeping first occurrence');
+                        continue;
+                    }
+                    out[r.id] = r;
+                }
+                return out;
             }
 
-            if (items.length === 0) {
-                throw new Error('No rows with a title were found.');
+            state.loeById       = indexBy(state.loes,       'LOEs');
+            state.themeById     = indexBy(state.themes,     'Themes');
+            state.activityById  = indexBy(state.activities, 'Activities');
+            state.milestoneById = indexBy(state.milestones, 'Milestones');
+
+
+            // ---- Synthetic placeholders for orphans -------------------
+
+            function ensureUnassignedLoe() {
+                if (state.loeById[UNASSIGNED_LOE_ID]) return;
+                const u = { id: UNASSIGNED_LOE_ID, title: '(Unassigned)',
+                            description: 'Auto-created bucket for items whose links could not be resolved. See the warnings indicator in the toolbar.' };
+                state.loes.push(u);
+                state.loeById[u.id] = u;
+            }
+            function ensureUnassignedTheme() {
+                if (state.themeById[UNASSIGNED_THEME_ID]) return;
+                ensureUnassignedLoe();
+                const u = { id: UNASSIGNED_THEME_ID, loeId: UNASSIGNED_LOE_ID,
+                            title: '(Unassigned)',
+                            description: 'Activities whose theme id was missing or unknown.' };
+                state.themes.push(u);
+                state.themeById[u.id] = u;
+            }
+            function ensureUnassignedActivity() {
+                if (state.activityById[UNASSIGNED_ACTIVITY_ID]) return;
+                ensureUnassignedTheme();
+                const u = { id: UNASSIGNED_ACTIVITY_ID, themeId: UNASSIGNED_THEME_ID,
+                            level: 1,
+                            title: '(Unassigned milestones / benefits)',
+                            description: 'Milestones or benefits whose parent link could not be resolved.',
+                            start: null, end: null, sheetRow: -1,
+                            parentId: null, childIds: [] };
+                state.activities.push(u);
+                state.activityById[u.id] = u;
             }
 
-            // Parent inference:
-            //   - "b" rows attach to the most recent non-benefit row
-            //     above and inherit that row's level for grouping.
-            //   - Numbered rows at level > 1 attach to the most recent
-            //     non-benefit row with level (n - 1):
-            //         * range children (start != end) become normal
-            //           children that expand into their own row
-            //         * point children (start == end) become overlay
-            //           markers on the parent's bar instead, just like
-            //           benefits do
-            for (let i = 0; i < items.length; i++) {
 
-                const item = items[i];
+            // ---- Rehome themes / activities to unassigned where needed --
 
-                if (item.isBenefit) {
+            for (const t of state.themes) {
+                if (t.id === UNASSIGNED_THEME_ID) continue;
+                if (t.loeId && state.loeById[t.loeId]) continue;
+                warn('Themes', t.id, t.title,
+                     'LOE id ' + (t.loeId ? "'" + t.loeId + "' not found" : 'missing'));
+                ensureUnassignedLoe();
+                t.loeId = UNASSIGNED_LOE_ID;
+            }
 
-                    // Walk up to the first row that's actually rendered
-                    // as its own row - i.e. not a "b" benefit and not a
-                    // point-with-parent (which is itself an overlay).
+            for (const a of state.activities) {
+                if (a.id === UNASSIGNED_ACTIVITY_ID) continue;
+                if (a.themeId && state.themeById[a.themeId]) continue;
+                warn('Activities', a.id, a.title,
+                     'theme id ' + (a.themeId ? "'" + a.themeId + "' not found" : 'missing'));
+                ensureUnassignedTheme();
+                a.themeId = UNASSIGNED_THEME_ID;
+            }
+
+
+            // ---- Group by parent (preserves sheet order) --------------
+
+            state.themesByLoe = {};
+            for (const t of state.themes) {
+                (state.themesByLoe[t.loeId] = state.themesByLoe[t.loeId] || []).push(t);
+            }
+
+            state.activitiesByTheme = {};
+            for (const a of state.activities) {
+                (state.activitiesByTheme[a.themeId] = state.activitiesByTheme[a.themeId] || []).push(a);
+            }
+
+
+            // ---- Activity parent inference, per theme ------------------
+
+            for (const themeId of Object.keys(state.activitiesByTheme)) {
+
+                const acts = state.activitiesByTheme[themeId];
+
+                for (let i = 0; i < acts.length; i++) {
+                    const a = acts[i];
+                    if (a.level === 1) { a.parentId = null; continue; }
+
+                    let parent = null;
                     for (let j = i - 1; j >= 0; j--) {
-                        const cand = items[j];
-                        if (cand.isBenefit)                          continue;
-                        if (cand.parentId && cand.isPoint)           continue;
-                        item.parentId = cand.id;
-                        item.level    = cand.level;
-                        cand.overlayIds.push(item.id);
-                        break;
+                        if (acts[j].level === a.level - 1) { parent = acts[j]; break; }
                     }
 
-                } else if (item.level > 1) {
-
-                    for (let j = i - 1; j >= 0; j--) {
-                        if (!items[j].isBenefit && items[j].level === item.level - 1) {
-                            item.parentId = items[j].id;
-                            if (item.isPoint) {
-                                items[j].overlayIds.push(item.id);
-                            } else {
-                                items[j].childIds.push(item.id);
-                            }
-                            break;
-                        }
+                    if (parent) {
+                        a.parentId = parent.id;
+                        parent.childIds.push(a.id);
+                    } else {
+                        warn('Activities', a.id, a.title,
+                             'no level-' + (a.level - 1) + ' parent above - promoted to level 1');
+                        a.level    = 1;
+                        a.parentId = null;
                     }
                 }
             }
 
-            state.items    = items;
-            state.byId     = Object.fromEntries(items.map(it => [it.id, it]));
-            state.expanded = new Set();
 
-            // Full date extent of the loaded data, used as the default
-            // window for the toolbar's date-range filter.
-            let dMin = null, dMax = null;
-            for (const it of items) {
-                if (it.start && (!dMin || it.start < dMin)) dMin = it.start;
-                if (it.end   && (!dMax || it.end   > dMax)) dMax = it.end;
+            // ---- Link milestones to activities ------------------------
+
+            state.milestonesByActivity = {};
+            for (const m of state.milestones) {
+                if (!m.activityId || !state.activityById[m.activityId]) {
+                    warn('Milestones', m.id, m.title,
+                         'activity id ' + (m.activityId ? "'" + m.activityId + "' not found" : 'missing'));
+                    ensureUnassignedActivity();
+                    m.activityId = UNASSIGNED_ACTIVITY_ID;
+                }
+                (state.milestonesByActivity[m.activityId] = state.milestonesByActivity[m.activityId] || []).push(m);
             }
+
+
+            // ---- Link benefits to activities via their milestone -------
+
+            state.benefitsByActivity = {};
+            for (const b of state.benefits) {
+
+                let activityId = null;
+
+                if (b.milestoneId && state.milestoneById[b.milestoneId]) {
+                    activityId = state.milestoneById[b.milestoneId].activityId;
+                } else {
+                    warn('Benefits', b.id, b.title,
+                         'milestone id ' + (b.milestoneId ? "'" + b.milestoneId + "' not found" : 'missing'));
+                    ensureUnassignedActivity();
+                    activityId = UNASSIGNED_ACTIVITY_ID;
+                }
+
+                b.activityId = activityId;
+                (state.benefitsByActivity[activityId] = state.benefitsByActivity[activityId] || []).push(b);
+            }
+
+
+            // ---- Link risks to milestones ----------------------------
+
+            state.risksByMilestone = {};
+            for (const r of state.risks) {
+                if (!r.milestoneId || !state.milestoneById[r.milestoneId]) {
+                    warn('Risks', r.id, r.title,
+                         'milestone id ' + (r.milestoneId ? "'" + r.milestoneId + "' not found" : 'missing'));
+                    // Risks aren't plotted anywhere, so we just store them
+                    // against a synthetic key so they still appear in the
+                    // warnings list. We don't attach to any milestone.
+                    continue;
+                }
+                (state.risksByMilestone[r.milestoneId] = state.risksByMilestone[r.milestoneId] || []).push(r);
+            }
+
+
+            // ---- Date extent across activities / milestones / benefits -
+
+            let dMin = null, dMax = null;
+            function bumpDate(d) {
+                if (!d) return;
+                if (!dMin || d < dMin) dMin = d;
+                if (!dMax || d > dMax) dMax = d;
+            }
+            for (const a of state.activities) { bumpDate(a.start); bumpDate(a.end); }
+            for (const m of state.milestones) { bumpDate(m.date); }
+            for (const b of state.benefits)   { bumpDate(b.date); }
+
             state.dataDateMin = dMin;
             state.dataDateMax = dMax;
             state.dateStart   = dMin;
             state.dateEnd     = dMax;
+
+
+            // ---- Initial filter sets - everything checked --------------
+
+            state.loeFilter   = new Set(state.loes.map(l => l.id));
+            state.themeFilter = new Set(state.themes.map(t => t.id));
         }
 
 
 
         /* ================================================================
-         * Section 5: date parsing (month/year)
+         * Section 5: date parsing (day precision)
          * ================================================================
          */
 
-        function parseMonthYear(raw) {
+        // Parse a cell to a real (day-precision) Date, or null. Inputs:
+        //   - JS Date  -> normalised to midnight local time
+        //   - Excel serial number -> via XLSX.SSF.parse_date_code
+        //   - String "dd/mm/yyyy" or "dd-mm-yyyy" (day first - locked!)
+        //   - String "yyyy-mm-dd" via native Date parse
+        function parseDate(raw) {
 
             if (raw == null || raw === '') return null;
 
             if (raw instanceof Date) {
-                return new Date(raw.getFullYear(), raw.getMonth(), 1);
+                return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
             }
 
             if (typeof raw === 'number') {
-                // SheetJS serial date number - convert.
                 const d = XLSX.SSF && XLSX.SSF.parse_date_code
                     ? XLSX.SSF.parse_date_code(raw)
                     : null;
 
-                if (d && d.y) return new Date(d.y, (d.m || 1) - 1, 1);
+                if (d && d.y) return new Date(d.y, (d.m || 1) - 1, d.d || 1);
             }
 
             const s = String(raw).trim();
 
-            // Native parse handles "Jan 2026", "January 2026", "2026-01-01", etc.
-            const d = new Date(s);
-            if (!isNaN(d.getTime())) {
-                return new Date(d.getFullYear(), d.getMonth(), 1);
+            // Primary: dd/mm/yyyy or dd-mm-yyyy. Locked to day-first
+            // (the workbook's documented format) to avoid the US-locale
+            // ambiguity in `new Date("01/02/2026")`.
+            let m = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(s);
+            if (m) {
+                return new Date(parseInt(m[3], 10), parseInt(m[2], 10) - 1, parseInt(m[1], 10));
             }
 
-            // "MM/YYYY" or "M-YYYY"
-            let m = /^(\d{1,2})[\/\-](\d{4})$/.exec(s);
+            // ISO yyyy-mm-dd via the native parser.
+            m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
             if (m) {
-                return new Date(parseInt(m[2], 10), parseInt(m[1], 10) - 1, 1);
-            }
-
-            // "YYYY/MM" or "YYYY-MM"
-            m = /^(\d{4})[\/\-](\d{1,2})$/.exec(s);
-            if (m) {
-                return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, 1);
+                return new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
             }
 
             return null;
@@ -1405,41 +1876,55 @@
         }
 
 
+        function daysInMonth(y, m) {
+            return new Date(y, m + 1, 0).getDate();
+        }
+
+
         function formatMonthYear(d) {
             if (!d) return '';
             return d.toLocaleString('en', { month: 'short', year: 'numeric' });
         }
 
 
+        function formatDayMonthYear(d) {
+            if (!d) return '';
+            return d.getDate() + ' '
+                 + d.toLocaleString('en', { month: 'short' }) + ' '
+                 + d.getFullYear();
+        }
+
+
 
         /* ================================================================
-         * Section 6: which items are currently visible
+         * Section 6: filtering, visibility, colour & shape lookup
          * ================================================================
          */
 
-        function passesFilters(item) {
+        // Does this activity pass all currently-active filters? Only
+        // activities take rows in the chart; milestones and benefits
+        // inherit visibility from their parent activity.
+        function activityPasses(activity) {
 
-            if (!state.typeFilter.has(item.type)) return false;
-
-            // Items without a confidence value are not filtered out by
-            // the confidence checkboxes; only explicitly-tagged items
-            // are filtered.
-            if (item.confidence && !state.confidenceFilter.has(item.confidence)) {
-                return false;
+            const theme = state.themeById[activity.themeId];
+            if (theme) {
+                if (!state.themeFilter.has(theme.id))  return false;
+                if (!state.loeFilter.has(theme.loeId)) return false;
             }
 
-            // Date-range filter: an item is shown if its date range
-            // overlaps the [dateStart, dateEnd] window (either side may
-            // be unbounded). Items without start/end dates are not
-            // affected by the date filter.
-            if (state.dateStart && item.end   && item.end   < state.dateStart) return false;
-            if (state.dateEnd   && item.start && item.start > state.dateEnd)   return false;
+            // Date-range filter: an activity is shown if its date range
+            // overlaps the [dateStart, dateEnd] window. Activities with
+            // no dates (e.g. the synthetic "(Unassigned)" bucket) are
+            // not affected.
+            if (state.dateStart && activity.end   && activity.end   < state.dateStart) return false;
+            if (state.dateEnd   && activity.start && activity.start > state.dateEnd)   return false;
 
             return true;
         }
 
 
-        // "2026-05" -> Date(2026, 4, 1)  (first of month)
+        // "2026-05" -> Date(2026, 4, 1)  (first of month, for the
+        // <input type="month"> in the toolbar's date-range filter).
         function parseMonthInput(value) {
             if (!value) return null;
             const m = /^(\d{4})-(\d{2})$/.exec(String(value).trim());
@@ -1453,82 +1938,55 @@
         }
 
 
-        // An item is rendered as an overlay on its parent's bar (rather
-        // than getting its own row) if it's a benefit (level = b) or a
-        // single-point child (start == end) of a numbered parent.
-        function isOverlay(item) {
-            return item.isBenefit || (item.parentId && item.isPoint);
-        }
-
-
+        // Build the flat list of activity rows that should be rendered,
+        // in LOE -> Theme -> activity-sheet-order, descending into
+        // level-2 / level-3 children when the parent is expanded.
         function visibleItems() {
 
             const out = [];
 
-            function pushWithChildren(item) {
-
-                if (!passesFilters(item)) return;
-
-                if (isOverlay(item)) {
-                    // Overlays draw on the parent's bar instead of
-                    // taking a row of their own. But a point-overlay
-                    // can still have child rows (e.g. a level-2
-                    // milestone with level-3 sub-items); when its
-                    // own "More info" toggle is expanded, surface
-                    // those children as rows below the parent.
-                    if (!item.isBenefit
-                        && item.childIds.length > 0
-                        && state.expanded.has(item.id)) {
-                        for (const childId of item.childIds) {
-                            pushWithChildren(state.byId[childId]);
-                        }
-                    }
-                    return;
-                }
-
-                out.push(item);
-
-                if (!state.expanded.has(item.id)) return;
-
-                for (const childId of item.childIds) {
-                    pushWithChildren(state.byId[childId]);
-                }
-                for (const overlayId of item.overlayIds) {
-                    pushWithChildren(state.byId[overlayId]);
+            function pushWithChildren(act) {
+                if (!activityPasses(act)) return;
+                out.push(act);
+                if (!state.expanded.has(act.id)) return;
+                for (const cid of act.childIds) {
+                    pushWithChildren(state.activityById[cid]);
                 }
             }
 
-            for (const item of state.items) {
-                if (item.level === 1 && !item.isBenefit) pushWithChildren(item);
+            for (const loe of state.loes) {
+                if (!state.loeFilter.has(loe.id)) continue;
+
+                const themes = state.themesByLoe[loe.id] || [];
+                for (const theme of themes) {
+                    if (!state.themeFilter.has(theme.id)) continue;
+
+                    const acts = state.activitiesByTheme[theme.id] || [];
+                    for (const a of acts) {
+                        if (a.level !== 1) continue;
+                        pushWithChildren(a);
+                    }
+                }
             }
 
             return out;
         }
 
 
-        function visibleOverlaysFor(item) {
-            return item.overlayIds
-                .map(id => state.byId[id])
-                .filter(b => passesFilters(b));
+        // Diamond + star markers that overlay an activity's bar. Milestones
+        // are diamonds; benefits are stars coloured by impact.
+        function visibleOverlaysFor(activity) {
+            return {
+                milestones: (state.milestonesByActivity[activity.id] || []),
+                benefits:   (state.benefitsByActivity[activity.id]   || []),
+            };
         }
 
 
-        function colourKey(item) {
-            if (state.colourBy === 'confidence') {
-                if (item.confidence === 'h') return 'high';
-                if (item.confidence === 'm') return 'medium';
-                if (item.confidence === 'l') return 'low';
-                return 'unknown';
-            }
-            return item.type;
-        }
+        function activityColourKey() { return 'default'; }
+        function milestoneColourKey() { return 'default'; }
+        function benefitColourKey(b) { return 'impact-' + (b.impact || 3); }
 
-
-        // Shape selection: benefits (level = b OR type = benefit) are
-        // drawn as stars, everything else as diamonds.
-        function isBenefitItem(item) {
-            return item.isBenefit || item.type === 'benefit';
-        }
 
         function diamondPoints(cx, cy, half) {
             return `${cx},${cy - half} ${cx + half},${cy} `
@@ -1548,11 +2006,12 @@
             return out.join(' ');
         }
 
-        function pointShapePoints(item, cx, cy, half) {
-            if (isBenefitItem(item)) {
-                return starPoints(cx, cy, half * 1.15, half * 0.5);
-            }
+        function diamondShapeAt(cx, cy, half) {
             return diamondPoints(cx, cy, half);
+        }
+
+        function starShapeAt(cx, cy, half) {
+            return starPoints(cx, cy, half * 1.15, half * 0.5);
         }
 
 
@@ -1581,24 +2040,34 @@
 
         function render() {
 
+            // Re-render cancels any pending milestone-tooltip expansion
+            // timer so it can't fire against a stale target.
+            cancelTooltipExpand();
+
             const axisSvg = document.getElementById('axis-chart');
             const bodySvg = document.getElementById('body-chart');
 
             axisSvg.innerHTML = '';
             bodySvg.innerHTML = '';
 
-            if (state.items.length === 0) return;
+            if (state.activities.length === 0) return;
 
 
             // --- Date range ---
 
-            // Data extent across items that survive the current filters
-            // (so an active date filter shrinks the axis to its window).
+            // Data extent across activities/milestones/benefits that pass
+            // the current filters (so an active filter shrinks the axis).
             let dataMin = null, dataMax = null;
-            for (const it of state.items) {
-                if (!passesFilters(it)) continue;
-                if (it.start && (!dataMin || it.start < dataMin)) dataMin = it.start;
-                if (it.end   && (!dataMax || it.end   > dataMax)) dataMax = it.end;
+            function bumpExtent(d) {
+                if (!d) return;
+                if (!dataMin || d < dataMin) dataMin = d;
+                if (!dataMax || d > dataMax) dataMax = d;
+            }
+            for (const a of state.activities) {
+                if (!activityPasses(a)) continue;
+                bumpExtent(a.start); bumpExtent(a.end);
+                for (const m of state.milestonesByActivity[a.id] || []) bumpExtent(m.date);
+                for (const b of state.benefitsByActivity[a.id]   || []) bumpExtent(b.date);
             }
 
             // Axis bounds. The filter dates take precedence; the
@@ -1633,19 +2102,21 @@
                 return;
             }
 
+            // Snap minDate to the start of its month so the axis sits
+            // on month boundaries even though items are plotted by day.
+            minDate = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+            maxDate = new Date(maxDate.getFullYear(), maxDate.getMonth(), 1);
+
             const totalMonths = monthsBetween(minDate, maxDate);
 
-            // The last month visible on the axis (used to clip bars
-            // that extend beyond the chart).
-            const lastVisibleMonth = new Date(
-                maxDate.getFullYear(),
-                maxDate.getMonth() - 1,
-                1,
-            );
+            // Last visible day of the chart - one day before maxDate
+            // (since maxDate is the first of the month *after* the last
+            // visible month).
+            const lastVisibleDate = new Date(maxDate.getFullYear(), maxDate.getMonth(), 0);
 
             function clampDate(d) {
-                if (d < minDate)          return minDate;
-                if (d > lastVisibleMonth) return lastVisibleMonth;
+                if (d < minDate)         return minDate;
+                if (d > lastVisibleDate) return lastVisibleDate;
                 return d;
             }
 
@@ -1664,12 +2135,17 @@
             const chartWidth      = LAYOUT.marginLeft + usableWidth + LAYOUT.marginRight;
 
 
-            function xForMonthStart(d) {
-                return LAYOUT.marginLeft + monthsBetween(minDate, d) * monthWidth;
+            // Day-precision x: month index * monthWidth + day fraction.
+            function xForDate(d) {
+                const monthStart = new Date(d.getFullYear(), d.getMonth(), 1);
+                const monthIdx   = monthsBetween(minDate, monthStart);
+                const dayFrac    = (d.getDate() - 1) / daysInMonth(d.getFullYear(), d.getMonth());
+                return LAYOUT.marginLeft + (monthIdx + dayFrac) * monthWidth;
             }
 
-            function xForMonthEnd(d) {
-                return LAYOUT.marginLeft + (monthsBetween(minDate, d) + 1) * monthWidth;
+            // Month-aligned x, for axis ticks and the grid.
+            function xForMonthStart(d) {
+                return LAYOUT.marginLeft + monthsBetween(minDate, d) * monthWidth;
             }
 
 
@@ -1677,44 +2153,57 @@
 
             const visible = visibleItems();
 
-            // Pre-compute which overlays are visible for each row so the
-            // sizing and layout passes agree on what's drawn.
-            const visibleOverlays = {};
-            for (const it of visible) {
-                visibleOverlays[it.id] = visibleOverlaysFor(it);
+            // Pre-compute milestone + benefit overlays per visible
+            // activity so the sizing and layout passes agree.
+            const overlaysFor = {};
+            for (const a of visible) {
+                overlaysFor[a.id] = visibleOverlaysFor(a);
+            }
+            function overlayCount(a) {
+                const o = overlaysFor[a.id];
+                return o.milestones.length + o.benefits.length;
             }
 
-            // Natural (un-scaled) body height needed for everything.
-            let themeRunCount = 0;
+            // Build a flat list of layout rows that also includes LOE
+            // and theme header bands at the appropriate positions, so
+            // both the natural-height calc and the layout pass walk the
+            // same sequence.
+            // Each entry is one of:
+            //   { type: 'loe',      loe }
+            //   { type: 'theme',    theme }
+            //   { type: 'activity', activity }
+            const seq = [];
             {
-                let last = null;
-                for (const it of visible) {
-                    if (it.theme !== last) { themeRunCount++; last = it.theme; }
+                let lastLoe = null, lastTheme = null;
+                for (const a of visible) {
+                    const theme = state.themeById[a.themeId];
+                    const loeId = theme ? theme.loeId : UNASSIGNED_LOE_ID;
+                    if (loeId !== lastLoe) {
+                        seq.push({ type: 'loe', loe: state.loeById[loeId] });
+                        lastLoe   = loeId;
+                        lastTheme = null;
+                    }
+                    if (a.themeId !== lastTheme) {
+                        seq.push({ type: 'theme', theme: theme });
+                        lastTheme = a.themeId;
+                    }
+                    seq.push({ type: 'activity', activity: a });
                 }
             }
 
-            // Child-bearing overlays of this row that need a
-            // "More info" toggle line in the left column.
-            function childBearingOverlaysOf(it) {
-                return visibleOverlays[it.id].filter(ov =>
-                    !ov.isBenefit && ov.childIds.length > 0
-                );
-            }
+            // Natural (un-scaled) body height.
+            let naturalBody = LAYOUT.bodyMarginTop + LAYOUT.bodyMarginBottom;
+            for (const entry of seq) {
+                if (entry.type === 'loe')   { naturalBody += LAYOUT.loeHeaderHeight; continue; }
+                if (entry.type === 'theme') { naturalBody += LAYOUT.themeHeaderHeight; continue; }
 
-            const naturalBody = LAYOUT.bodyMarginTop
-                + themeRunCount * LAYOUT.themeHeaderHeight
-                + visible.reduce((s, it) => {
-                    let h = LAYOUT.rowHeight[it.level];
-                    if (visibleOverlays[it.id].length > 0 && state.expanded.has(it.id)) {
-                        h += LAYOUT.benefitZoneHeight[it.level];
-                    }
-                    if (state.expanded.has(it.id)) {
-                        h += childBearingOverlaysOf(it).length
-                           * LAYOUT.moreInfoLineHeight[it.level];
-                    }
-                    return s + h;
-                }, 0)
-                + LAYOUT.bodyMarginBottom;
+                const a = entry.activity;
+                let h = LAYOUT.rowHeight[a.level];
+                if (overlayCount(a) > 0 && state.expanded.has(a.id)) {
+                    h += LAYOUT.overlayZoneHeight[a.level];
+                }
+                naturalBody += h;
+            }
 
             const availableBody = window.innerHeight
                 - LAYOUT.toolbarHeight
@@ -1738,70 +2227,69 @@
                 rowHeight:         scaleMap(LAYOUT.rowHeight),
                 barHeight:         scaleMap(LAYOUT.barHeight),
                 fontSize:          scaleMap(LAYOUT.fontSize),
-                benefitZoneHeight: scaleMap(LAYOUT.benefitZoneHeight),
-                benefitDiamondSize:scaleMap(LAYOUT.benefitDiamondSize),
-                benefitFontSize:   scaleMap(LAYOUT.benefitFontSize),
-                moreInfoLineHeight:scaleMap(LAYOUT.moreInfoLineHeight),
-                moreInfoFontSize:  scaleMap(LAYOUT.moreInfoFontSize),
+                overlayZoneHeight: scaleMap(LAYOUT.overlayZoneHeight),
+                overlayMarkerSize: scaleMap(LAYOUT.overlayMarkerSize),
+                overlayFontSize:   scaleMap(LAYOUT.overlayFontSize),
+                loeHeaderHeight:   LAYOUT.loeHeaderHeight   * scale,
                 themeHeaderHeight: LAYOUT.themeHeaderHeight * scale,
-                themeFontSize:     15 * Math.max(scale, 0.75),
+                loeFontSize:       LAYOUT.loeFontSize   * Math.max(scale, 0.75),
+                themeFontSize:     LAYOUT.themeFontSize * Math.max(scale, 0.75),
             };
 
 
             // --- Vertical layout (in body-SVG coords; axis is separate) ---
 
-            const rowY       = {};
-            const rowHTotal  = {};        // total height per row (bar zone + benefit zone + more-info lines)
-            const moreInfoZ  = {};        // per row: height reserved for "More info" toggle lines
-            const themeBands = [];        // [{ theme, headerY, yTop, yBot }]
+            const rowY      = {};   // activityId -> y
+            const rowHTotal = {};   // activityId -> total height (bar zone + overlay zone)
+            const loeBands   = [];  // [{ loe, headerY, yTop, yBot }]
+            const themeBands = [];  // [{ theme, headerY, yTop, yBot }]
 
-            let y           = LAYOUT.bodyMarginTop;
-            let currentBand = null;
+            let y          = LAYOUT.bodyMarginTop;
+            let curLoeBand   = null;
+            let curThemeBand = null;
 
-            for (const it of visible) {
+            for (const entry of seq) {
 
-                if (!currentBand || it.theme !== currentBand.theme) {
-
-                    if (currentBand) currentBand.yBot = y;
-
-                    currentBand = {
-                        theme:   it.theme,
+                if (entry.type === 'loe') {
+                    if (curThemeBand) { curThemeBand.yBot = y; curThemeBand = null; }
+                    if (curLoeBand)   { curLoeBand.yBot   = y; }
+                    curLoeBand = {
+                        loe:     entry.loe,
                         headerY: y,
                         yTop:    y,
                         yBot:    0,
                     };
-                    themeBands.push(currentBand);
-
-                    y += sized.themeHeaderHeight;
+                    loeBands.push(curLoeBand);
+                    y += sized.loeHeaderHeight;
+                    continue;
                 }
 
-                const barZ = sized.rowHeight[it.level];
-                const benZ = (visibleOverlays[it.id].length > 0 && state.expanded.has(it.id))
-                    ? sized.benefitZoneHeight[it.level]
+                if (entry.type === 'theme') {
+                    if (curThemeBand) curThemeBand.yBot = y;
+                    curThemeBand = {
+                        theme:   entry.theme,
+                        headerY: y,
+                        yTop:    y,
+                        yBot:    0,
+                    };
+                    themeBands.push(curThemeBand);
+                    y += sized.themeHeaderHeight;
+                    continue;
+                }
+
+                const a    = entry.activity;
+                const barZ = sized.rowHeight[a.level];
+                const ovZ  = (overlayCount(a) > 0 && state.expanded.has(a.id))
+                    ? sized.overlayZoneHeight[a.level]
                     : 0;
 
-                const childBearing = state.expanded.has(it.id)
-                    ? childBearingOverlaysOf(it)
-                    : [];
-                const moreLineH = sized.moreInfoLineHeight[it.level];
-                const moreZ     = childBearing.length * moreLineH;
+                rowY[a.id]      = y;
+                rowHTotal[a.id] = barZ + ovZ;
 
-                rowY[it.id]      = y;
-                rowHTotal[it.id] = barZ + benZ + moreZ;
-                moreInfoZ[it.id] = moreZ;
-
-                // Each child-bearing overlay's "More info" line acts
-                // as the visual parent of its level n+2 child rows;
-                // record its absolute Y so the connector pass below
-                // can draw from the toggle line down to each child.
-                childBearing.forEach((ov, idx) => {
-                    rowY[ov.id]      = y + barZ + benZ + idx * moreLineH;
-                    rowHTotal[ov.id] = moreLineH;
-                });
-
-                y += barZ + benZ + moreZ;
+                y += barZ + ovZ;
             }
-            if (currentBand) currentBand.yBot = y;
+            if (curThemeBand) curThemeBand.yBot = y;
+            if (curLoeBand)   curLoeBand.yBot   = y;
 
             const bodyHeight = Math.max(y + LAYOUT.bodyMarginBottom, 120);
 
@@ -1891,16 +2379,15 @@
             bodySvg.appendChild(defs);
 
 
-            // --- Theme bands ---
+            // --- LOE bands (outer) and Theme bands (inner) ---
 
             const swimG = svgEl('g', { id: 'swimlanes' });
             bodySvg.appendChild(swimG);
 
-            themeBands.forEach((band, bandIndex) => {
-
+            loeBands.forEach((band, bandIndex) => {
                 const fill = bandIndex % 2 === 0
-                    ? 'rgba(255, 255, 255, 0.03)'
-                    : 'rgba(255, 255, 255, 0.07)';
+                    ? 'rgba(255, 255, 255, 0.04)'
+                    : 'rgba(255, 255, 255, 0.08)';
 
                 swimG.appendChild(svgEl('rect', {
                     class: 'swimlane',
@@ -1912,17 +2399,35 @@
 
                 swimG.appendChild(svgEl('line', {
                     class: 'theme-divider',
-                    x1: 0,                  x2: chartWidth,
-                    y1: band.yTop + 0.5,    y2: band.yTop + 0.5,
+                    x1: 0,                x2: chartWidth,
+                    y1: band.yTop + 0.5,  y2: band.yTop + 0.5,
                 }));
 
+                if (band.loe) {
+                    const lbl = svgEl('text', {
+                        class: 'loe-label',
+                        'data-kind': 'loe',
+                        'data-id':   band.loe.id,
+                        x: LAYOUT.labelLeftPad,
+                        y: band.headerY + sized.loeHeaderHeight / 2 + 6,
+                        'font-size': sized.loeFontSize,
+                    });
+                    lbl.textContent = band.loe.title;
+                    swimG.appendChild(lbl);
+                }
+            });
+
+            themeBands.forEach((band) => {
+                if (!band.theme) return;
                 const lbl = svgEl('text', {
                     class: 'theme-label',
-                    x: LAYOUT.labelLeftPad,
+                    'data-kind': 'theme',
+                    'data-id':   band.theme.id,
+                    x: LAYOUT.labelLeftPad + LAYOUT.labelIndent,
                     y: band.headerY + sized.themeHeaderHeight / 2 + 5,
                     'font-size': sized.themeFontSize,
                 });
-                lbl.textContent = band.theme;
+                lbl.textContent = band.theme.title;
                 swimG.appendChild(lbl);
             });
 
@@ -1947,39 +2452,39 @@
             }
 
 
-            // --- Rows ---
+            // --- Rows (activities) ---
 
             const rowsG = svgEl('g', { id: 'rows' });
             bodySvg.appendChild(rowsG);
 
             const labelAreaEnd = LAYOUT.marginLeft - LAYOUT.labelRightPad;
 
-            for (const it of visible) {
+            for (const a of visible) {
 
-                const ry        = rowY[it.id];
-                const barZone   = sized.rowHeight[it.level];
-                const rh        = rowHTotal[it.id];
-                const indent    = (it.level - 1) * LAYOUT.labelIndent;
-                const isExp     = state.expanded.has(it.id);
-                const overlaysExist = visibleOverlays[it.id].length > 0;
-                const expand    = (it.childIds.length > 0 && it.level < 3) || overlaysExist;
-                const fs        = sized.fontSize[it.level];
-                const overlays  = visibleOverlays[it.id];
+                const ry        = rowY[a.id];
+                const barZone   = sized.rowHeight[a.level];
+                const rh        = rowHTotal[a.id];
+                const indent    = (a.level - 1) * LAYOUT.labelIndent;
+                const isExp     = state.expanded.has(a.id);
+                const overlays  = overlaysFor[a.id];
+                const ovCount   = overlays.milestones.length + overlays.benefits.length;
+                const expand    = a.childIds.length > 0 && a.level < 3;
+                const fs        = sized.fontSize[a.level];
 
                 const rowG = svgEl('g', {
                     class: 'row'
                         + (expand ? ' expandable' : '')
                         + (isExp  ? ' expanded'   : ''),
-                    'data-id':    it.id,
-                    'data-level': it.level,
-                    'data-type':  it.type,
+                    'data-id':    a.id,
+                    'data-kind':  'activity',
+                    'data-level': a.level,
                     transform:    `translate(0, ${ry})`,
                 });
                 rowsG.appendChild(rowG);
 
 
                 // Row background spans the whole row including the
-                // benefit zone, so hovers and clicks still register
+                // overlay zone, so hovers and clicks still register
                 // anywhere on the row.
                 rowG.appendChild(svgEl('rect', {
                     class: 'row-bg',
@@ -1992,9 +2497,7 @@
                 const labelX = triX + LAYOUT.triangleGap;
 
 
-                // Expand icon (only if it has children that can be shown).
-                // Vertically centred against the bar zone, not the
-                // whole (possibly extended) row.
+                // Expand icon - only if the activity has child activities.
                 if (expand) {
                     const tri = svgEl('text', {
                         class: 'expand-icon',
@@ -2032,113 +2535,73 @@
                 label.style.lineHeight        = String(lineHeight);
                 label.style.webkitLineClamp   = String(maxLines);
                 label.style.lineClamp         = String(maxLines);
-                label.textContent             = it.title;
+                label.textContent             = a.title;
 
                 center.appendChild(label);
                 fo.appendChild(center);
                 rowG.appendChild(fo);
 
 
-                // Bar or marker for the row's own date range.
-                if (it.start && it.end) {
+                // Activity bar (day-precision).
+                if (a.start && a.end) {
 
-                    const isPoint = it.start.getTime() === it.end.getTime();
-                    const barH    = sized.barHeight[it.level];
-                    const barY    = (barZone - barH) / 2;
+                    const barH  = sized.barHeight[a.level];
+                    const barY  = (barZone - barH) / 2;
 
-                    if (isPoint) {
+                    const drawStart = clampDate(a.start);
+                    // Show the bar through to the end of the end date,
+                    // so a single-day activity still has some width.
+                    const drawEnd   = clampDate(new Date(
+                        a.end.getFullYear(), a.end.getMonth(), a.end.getDate() + 1
+                    ));
+                    const x0 = xForDate(drawStart);
+                    const x1 = xForDate(drawEnd);
 
-                        const cx = xForMonthStart(it.start) + monthWidth / 2;
-                        const cy = barY + barH / 2;
-                        const s  = barH / 1.6;
-
-                        rowG.appendChild(svgEl('polygon', {
-                            class: 'marker',
-                            'data-id':     it.id,
-                            'data-colour': colourKey(it),
-                            points: pointShapePoints(it, cx, cy, s),
-                        }));
-
-                    } else {
-
-                        // Clamp the displayed range to the visible
-                        // axis so an active date filter just truncates
-                        // bars at the chart edge instead of letting
-                        // them overflow.
-                        const drawStart = clampDate(it.start);
-                        const drawEnd   = clampDate(it.end);
-                        const x0        = xForMonthStart(drawStart);
-                        const x1        = xForMonthEnd(drawEnd);
-
-                        rowG.appendChild(svgEl('rect', {
-                            class: 'bar',
-                            'data-id':     it.id,
-                            'data-colour': colourKey(it),
-                            x: x0, y: barY,
-                            width: Math.max(x1 - x0, 4),
-                            height: barH,
-                            rx: 3, ry: 3,
-                        }));
-
-                        // Type-benefit numbered rows also get an
-                        // end-marker (a star) at the right edge of the
-                        // block - but only if the real end falls
-                        // within the visible window.
-                        if (it.type === 'benefit' && it.end <= lastVisibleMonth) {
-                            const cx = x1;
-                            const cy = barY + barH / 2;
-                            const s  = barH / 1.5;
-                            rowG.appendChild(svgEl('polygon', {
-                                class: 'marker end-marker',
-                                'data-id':     it.id,
-                                'data-colour': colourKey(it),
-                                points: pointShapePoints(it, cx, cy, s),
-                            }));
-                        }
-                    }
+                    rowG.appendChild(svgEl('rect', {
+                        class: 'bar',
+                        'data-id':     a.id,
+                        'data-kind':   'activity',
+                        'data-colour': activityColourKey(),
+                        x: x0, y: barY,
+                        width: Math.max(x1 - x0, 4),
+                        height: barH,
+                        rx: 3, ry: 3,
+                    }));
                 }
 
 
-                // Overlay markers (benefits + single-point children)
-                // sit on top of the parent's gantt bar at the same
-                // vertical centre. Their wrapped captions live in the
-                // benefit zone below the bar and only appear when the
-                // host row is expanded; collapsed rows show the markers
-                // alone (hover still reveals full info via tooltip).
-                if (overlays.length > 0) {
+                // Milestone diamonds + benefit stars overlaying the bar.
+                if (ovCount > 0) {
 
-                    const barH     = sized.barHeight[it.level];
-                    const barCy    = (barZone - barH) / 2 + barH / 2;   // == barZone / 2
+                    const barH   = sized.barHeight[a.level];
+                    const barCy  = (barZone - barH) / 2 + barH / 2;
+                    const ovSize = sized.overlayMarkerSize[a.level];
 
-                    const benZoneY = barZone;
-                    const benH     = sized.benefitZoneHeight[it.level];
-                    const ovSize   = sized.benefitDiamondSize[it.level];
-                    const benFs    = sized.benefitFontSize[it.level];
+                    const ovZoneY = barZone;
+                    const ovZoneH = sized.overlayZoneHeight[a.level];
+                    const ovFs    = sized.overlayFontSize[a.level];
+                    const lblY    = ovZoneY + 2;
+                    const lblH    = Math.max(8, ovZoneH - 4);
+                    const lblW    = Math.max(monthWidth * 1.4, 70);
 
-                    const lblY     = benZoneY + 2;
-                    const lblH     = Math.max(8, benH - 4);
-                    const lblW     = Math.max(monthWidth * 1.4, 70);
+                    const drawOverlay = (item, kind, points) => {
 
-                    for (const ov of overlays) {
-
-                        if (!ov.start) continue;
-
-                        const cx = xForMonthStart(ov.start) + monthWidth / 2;
+                        if (!item.date) return;
+                        const cx = xForDate(clampDate(item.date));
 
                         rowG.appendChild(svgEl('polygon', {
                             class: 'overlay-marker',
-                            'data-id':     ov.id,
-                            'data-colour': colourKey(ov),
-                            points: pointShapePoints(ov, cx, barCy, ovSize),
+                            'data-id':     item.id,
+                            'data-kind':   kind,
+                            'data-colour': kind === 'benefit' ? benefitColourKey(item) : milestoneColourKey(),
+                            points: points(cx, barCy, ovSize),
                         }));
 
-                        if (!isExp) continue;
+                        if (!isExp) return;
 
-                        // data-id on the foreignObject so hover/click
-                        // on the label resolves to this overlay item,
-                        // not the host row underneath it.
                         const ofo = svgEl('foreignObject', {
-                            'data-id': ov.id,
+                            'data-id':   item.id,
+                            'data-kind': kind,
                             x: cx - lblW / 2,
                             y: lblY,
                             width:  lblW,
@@ -2147,80 +2610,16 @@
 
                         const olbl = document.createElementNS(XHTML_NS, 'div');
                         olbl.setAttribute('class', 'overlay-label');
-                        olbl.style.fontSize    = benFs + 'px';
+                        olbl.style.fontSize    = ovFs + 'px';
                         olbl.style.lineHeight  = '1.15';
-                        olbl.textContent       = ov.title;
+                        olbl.textContent       = item.title;
 
                         ofo.appendChild(olbl);
                         rowG.appendChild(ofo);
-                    }
-                }
+                    };
 
-
-                // "More info" toggle lines: one per child-bearing
-                // point-overlay (a sub-milestone with its own further
-                // sub-rows). Drawn in the left header column, stacked
-                // below the diamond-label zone, so the otherwise-hidden
-                // grandchildren of a level-2 point can be revealed.
-                if (isExp && moreInfoZ[it.id] > 0) {
-
-                    const moreLineH  = sized.moreInfoLineHeight[it.level];
-                    const moreBaseY  = barZone
-                                     + (overlays.length > 0 ? sized.benefitZoneHeight[it.level] : 0);
-                    const moreFs     = sized.moreInfoFontSize[it.level];
-                    const childBearingOvs = visibleOverlays[it.id].filter(ov =>
-                        !ov.isBenefit && ov.childIds.length > 0
-                    );
-
-                    childBearingOvs.forEach((ov, idx) => {
-
-                        const lineY    = moreBaseY + idx * moreLineH;
-                        const ovIndent = (ov.level - 1) * LAYOUT.labelIndent;
-                        const ovTriX   = LAYOUT.labelLeftPad + ovIndent;
-                        const ovLblX   = ovTriX + LAYOUT.triangleGap;
-                        const ovExp    = state.expanded.has(ov.id);
-
-                        const tog = svgEl('g', {
-                            class: 'more-info-toggle' + (ovExp ? ' expanded' : ''),
-                            'data-overlay-id': ov.id,
-                        });
-                        rowG.appendChild(tog);
-
-                        // Wide invisible hit-rect so clicks anywhere
-                        // on the line toggle this overlay's children.
-                        tog.appendChild(svgEl('rect', {
-                            class: 'more-info-bg',
-                            x: 0, y: lineY,
-                            width: labelAreaEnd,
-                            height: moreLineH,
-                        }));
-
-                        const tri = svgEl('text', {
-                            class: 'expand-icon',
-                            x: ovTriX,
-                            y: lineY + moreLineH / 2 + moreFs / 3,
-                            'font-size': moreFs,
-                        });
-                        tri.textContent = ovExp ? '▾' : '▸';
-                        tog.appendChild(tri);
-
-                        const mfo = svgEl('foreignObject', {
-                            'data-id': ov.id,
-                            x: ovLblX,
-                            y: lineY,
-                            width:  Math.max(20, labelAreaEnd - ovLblX),
-                            height: moreLineH,
-                        });
-
-                        const mlbl = document.createElementNS(XHTML_NS, 'div');
-                        mlbl.setAttribute('class', 'more-info-label');
-                        mlbl.style.fontSize   = moreFs + 'px';
-                        mlbl.style.lineHeight = String(moreLineH) + 'px';
-                        mlbl.textContent      = 'More info: ' + ov.title;
-
-                        mfo.appendChild(mlbl);
-                        tog.appendChild(mfo);
-                    });
+                    for (const m of overlays.milestones) drawOverlay(m, 'milestone', diamondShapeAt);
+                    for (const b of overlays.benefits)   drawOverlay(b, 'benefit',   starShapeAt);
                 }
             }
 
@@ -2230,23 +2629,23 @@
             const connG = svgEl('g', { id: 'connectors' });
             bodySvg.appendChild(connG);
 
-            for (const it of visible) {
+            for (const a of visible) {
 
-                if (!it.parentId) continue;
+                if (!a.parentId) continue;
 
-                const parent = state.byId[it.parentId];
+                const parent = state.activityById[a.parentId];
                 if (!(parent.id in rowY)) continue;
 
                 const parentTriX = LAYOUT.labelLeftPad
                                  + (parent.level - 1) * LAYOUT.labelIndent;
                 const childTriX  = LAYOUT.labelLeftPad
-                                 + (it.level     - 1) * LAYOUT.labelIndent;
+                                 + (a.level      - 1) * LAYOUT.labelIndent;
 
                 const parentIndentX = parentTriX + 6;
                 const childIndentX  = childTriX  - 4;
 
                 const startY = rowY[parent.id] + rowHTotal[parent.id];
-                const endY   = rowY[it.id]     + sized.rowHeight[it.level] / 2;
+                const endY   = rowY[a.id]      + sized.rowHeight[a.level] / 2;
 
                 connG.appendChild(svgEl('path', {
                     class: 'connector from-expanded',
@@ -2260,55 +2659,153 @@
 
 
         /* ================================================================
-         * Section 8: interactions (toggle types, expand, hover tooltip)
+         * Section 8: interactions (filters, expand, hover tooltip)
          * ================================================================
          */
 
+        // ---- Toolbar filter dropdowns (LOEs + Themes) -----------------
+
         function updateFilterCounts() {
 
-            const typeBoxes = document.querySelectorAll('.type-toggles input');
-            const typeOn    = Array.from(typeBoxes).filter(b => b.checked).length;
-            document.getElementById('type-count').textContent =
-                typeOn + '/' + typeBoxes.length;
+            const loeBoxes = document.querySelectorAll('.loe-toggles input[type="checkbox"]');
+            const loeOn    = Array.from(loeBoxes).filter(b => b.checked).length;
+            document.getElementById('loe-count').textContent =
+                loeOn + '/' + loeBoxes.length;
 
-            const confBoxes = document.querySelectorAll('.conf-toggles input');
-            const confOn    = Array.from(confBoxes).filter(b => b.checked).length;
-            document.getElementById('conf-count').textContent =
-                confOn + '/' + confBoxes.length;
+            const themeBoxes = document.querySelectorAll('.theme-toggles input[type="checkbox"]');
+            const themeOn    = Array.from(themeBoxes).filter(b => b.checked).length;
+            document.getElementById('theme-count').textContent =
+                themeOn + '/' + themeBoxes.length;
         }
 
 
-        document.querySelectorAll('.type-toggles input').forEach(cb => {
-            cb.addEventListener('change', () => {
+        // Populate the LOE + Theme dropdown panels from the loaded data.
+        // Themes are visually grouped under their LOE; unchecking an LOE
+        // also unchecks its themes (and re-checking re-checks them).
+        function rebuildFilterDropdowns() {
 
-                if (cb.checked) state.typeFilter.add(cb.dataset.type);
-                else            state.typeFilter.delete(cb.dataset.type);
+            const loePanel = document.querySelector('.loe-toggles');
+            loePanel.innerHTML = '';
+            for (const loe of state.loes) {
+                const lbl = document.createElement('label');
+                const cb  = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.dataset.loeId = loe.id;
+                cb.checked = state.loeFilter.has(loe.id);
+                const span = document.createElement('span');
+                span.textContent = loe.title;
+                lbl.appendChild(cb);
+                lbl.appendChild(span);
+                loePanel.appendChild(lbl);
 
-                updateFilterCounts();
-                render();
-            });
-        });
+                cb.addEventListener('change', () => {
+                    if (cb.checked) state.loeFilter.add(loe.id);
+                    else            state.loeFilter.delete(loe.id);
+
+                    // Cascade to this LOE's themes so they don't linger
+                    // visible with their parent off (and re-enable them
+                    // when the parent is re-checked).
+                    for (const t of (state.themesByLoe[loe.id] || [])) {
+                        const tcb = document.querySelector(
+                            '.theme-toggles input[data-theme-id="' + cssEscape(t.id) + '"]');
+                        if (!tcb) continue;
+                        if (cb.checked) {
+                            tcb.checked = true;
+                            state.themeFilter.add(t.id);
+                        } else {
+                            tcb.checked = false;
+                            state.themeFilter.delete(t.id);
+                        }
+                    }
+                    updateFilterCounts();
+                    render();
+                });
+            }
+
+            const themePanel = document.querySelector('.theme-toggles');
+            themePanel.innerHTML = '';
+            for (const loe of state.loes) {
+                const themes = state.themesByLoe[loe.id] || [];
+                if (themes.length === 0) continue;
+
+                const heading = document.createElement('div');
+                heading.className = 'dropdown-section';
+                heading.textContent = loe.title;
+                themePanel.appendChild(heading);
+
+                for (const t of themes) {
+                    const lbl = document.createElement('label');
+                    const cb  = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.dataset.themeId = t.id;
+                    cb.checked = state.themeFilter.has(t.id);
+                    const span = document.createElement('span');
+                    span.textContent = t.title;
+                    lbl.appendChild(cb);
+                    lbl.appendChild(span);
+                    themePanel.appendChild(lbl);
+
+                    cb.addEventListener('change', () => {
+                        if (cb.checked) state.themeFilter.add(t.id);
+                        else            state.themeFilter.delete(t.id);
+                        updateFilterCounts();
+                        render();
+                    });
+                }
+            }
+
+            updateFilterCounts();
+        }
+
+        // CSS.escape polyfill (sufficient for our id values).
+        function cssEscape(s) {
+            return String(s).replace(/[^a-zA-Z0-9_-]/g, ch =>
+                '\\' + ch.charCodeAt(0).toString(16) + ' ');
+        }
 
 
-        document.querySelectorAll('.conf-toggles input').forEach(cb => {
-            cb.addEventListener('change', () => {
+        // ---- Data-warning indicator ---------------------------------
 
-                if (cb.checked) state.confidenceFilter.add(cb.dataset.conf);
-                else            state.confidenceFilter.delete(cb.dataset.conf);
+        function updateWarningIndicator() {
 
-                updateFilterCounts();
-                render();
-            });
-        });
+            const wrap  = document.getElementById('warn-dropdown');
+            const count = document.getElementById('warn-count');
+            const panel = wrap.querySelector('.warn-panel');
+
+            if (state.dataWarnings.length === 0) {
+                wrap.hidden = true;
+                panel.innerHTML = '';
+                return;
+            }
+
+            wrap.hidden = false;
+            count.textContent = String(state.dataWarnings.length);
+
+            // Group by sheet so the user can scan through issues quickly.
+            const bySheet = {};
+            for (const w of state.dataWarnings) {
+                (bySheet[w.sheet] = bySheet[w.sheet] || []).push(w);
+            }
+
+            const sheetOrder = ['LOEs', 'Themes', 'Activities', 'Milestones', 'Benefits', 'Risks'];
+            let html = '';
+            for (const sheet of sheetOrder) {
+                const items = bySheet[sheet];
+                if (!items || items.length === 0) continue;
+                html += '<h4>' + escapeHtml(sheet) + ' (' + items.length + ')</h4>';
+                for (const w of items) {
+                    html += '<div class="warn-row">'
+                          +    '<span class="warn-id">' + escapeHtml(w.rowId) + '</span> '
+                          +    escapeHtml(w.rowTitle) + ' &mdash; '
+                          +    '<span class="warn-reason">' + escapeHtml(w.reason) + '</span>'
+                          + '</div>';
+                }
+            }
+            panel.innerHTML = html;
+        }
 
 
-        // --- Dropdown menus (filters + expand) ---
-        //
-        // Clicking the trigger button toggles the panel. Clicking
-        // anywhere outside an open panel closes it. Clicks inside a
-        // panel (checkboxes, action buttons) propagate to their own
-        // handlers without closing the panel - except action buttons,
-        // which close explicitly after running.
+        // --- Dropdown open/close behaviour ---
 
         function closeAllDropdowns() {
             document.querySelectorAll('.dropdown.open').forEach(d => {
@@ -2324,11 +2821,13 @@
 
             if (btn) {
                 const dropdown = btn.closest('.dropdown');
+                if (!dropdown) return;
                 const wasOpen  = dropdown.classList.contains('open');
                 closeAllDropdowns();
                 if (!wasOpen) {
                     dropdown.classList.add('open');
-                    dropdown.querySelector('.dropdown-panel').hidden = false;
+                    const panel = dropdown.querySelector('.dropdown-panel');
+                    if (panel) panel.hidden = false;
                 }
                 return;
             }
@@ -2339,24 +2838,23 @@
         });
 
 
+        // --- Expand controls ---
+
         function expandToLevel(maxLevel) {
 
             state.expanded.clear();
 
-            for (const it of state.items) {
+            for (const a of state.activities) {
 
-                if (it.isBenefit) continue;
-
-                const expandable = (it.childIds.length > 0 && it.level < 3)
-                                || it.overlayIds.length > 0;
+                const expandable = a.childIds.length > 0 && a.level < 3;
                 if (!expandable) continue;
 
                 // maxLevel = 2: reveal level 2 (expand level 1 rows).
-                // maxLevel = 3: reveal everything (expand all levels).
-                if (maxLevel === 2 && it.level === 1) {
-                    state.expanded.add(it.id);
-                } else if (maxLevel >= 3) {
-                    state.expanded.add(it.id);
+                // maxLevel = 3: reveal everything (expand levels 1+2).
+                if (maxLevel === 2 && a.level === 1) {
+                    state.expanded.add(a.id);
+                } else if (maxLevel >= 3 && (a.level === 1 || a.level === 2)) {
+                    state.expanded.add(a.id);
                 }
             }
 
@@ -2383,11 +2881,7 @@
         });
 
 
-        document.getElementById('colour-by').addEventListener('change', (e) => {
-            state.colourBy = e.target.value;
-            render();
-        });
-
+        // --- Date range ---
 
         document.getElementById('date-start').addEventListener('change', (e) => {
             state.dateStart = parseMonthInput(e.target.value);
@@ -2409,36 +2903,30 @@
         });
 
 
+        // --- Row expand/collapse on click ---
+
         document.getElementById('body-chart').addEventListener('click', (e) => {
 
-            // "More info" toggle for a child-bearing point-overlay -
-            // takes priority over both the overlay-click suppression
-            // (the toggle's foreignObject carries the overlay's
-            // data-id for tooltip purposes) and the row toggle.
-            const more = e.target.closest('.more-info-toggle');
-            if (more) {
-                const ovid = more.dataset.overlayId;
-                if (state.expanded.has(ovid)) state.expanded.delete(ovid);
-                else                          state.expanded.add(ovid);
-                render();
-                return;
-            }
-
-            // Overlay items (benefits + point-children) aren't
-            // expandable; a click on one should just leave the tooltip
-            // showing and not toggle the host row.
-            const hit = e.target.closest('[data-id]');
-            if (hit) {
-                const hitItem = state.byId[hit.dataset.id];
-                if (hitItem && isOverlay(hitItem)) return;
+            // Click on a milestone diamond toggles the tooltip's
+            // expanded state (revealing the risks list immediately)
+            // without affecting the row.
+            const target = e.target.closest('[data-id]');
+            if (target) {
+                const kind = target.dataset.kind;
+                if (kind === 'milestone') {
+                    tooltip.classList.toggle('expanded');
+                    return;
+                }
+                if (kind === 'benefit' || kind === 'loe' || kind === 'theme') {
+                    return;
+                }
             }
 
             const rowG = e.target.closest('.row.expandable');
             if (!rowG) return;
 
-            const id   = rowG.dataset.id;
-            const item = state.byId[id];
-            if (!item) return;
+            const id = rowG.dataset.id;
+            if (!state.activityById[id]) return;
 
             if (state.expanded.has(id)) state.expanded.delete(id);
             else                        state.expanded.add(id);
@@ -2447,7 +2935,11 @@
         });
 
 
+        // --- Tooltip ---
+
         const tooltip = document.getElementById('tooltip');
+        let tooltipTarget = null;     // current data-id being shown
+        let tooltipExpandTimer = null;
 
         function escapeHtml(s) {
             return String(s).replace(/[&<>"']/g, c => ({
@@ -2456,61 +2948,198 @@
             }[c]));
         }
 
+        function cancelTooltipExpand() {
+            if (tooltipExpandTimer) {
+                clearTimeout(tooltipExpandTimer);
+                tooltipExpandTimer = null;
+            }
+        }
+
+
+        function buildTooltipFields(pairs) {
+            // pairs: array of [label, value]; empty/null values are skipped.
+            const rows = pairs
+                .filter(p => p[1] != null && p[1] !== '')
+                .map(p => '<dt>' + escapeHtml(p[0]) + '</dt><dd>' + escapeHtml(p[1]) + '</dd>')
+                .join('');
+            return rows ? '<dl class="tt-fields">' + rows + '</dl>' : '';
+        }
+
+
+        function formatConfidence(c) {
+            if (c === 'h') return 'High';
+            if (c === 'm') return 'Medium';
+            if (c === 'l') return 'Low';
+            return '';
+        }
+
+
+        function buildTooltipHtml(target) {
+
+            const id   = target.dataset.id;
+            const kind = target.dataset.kind || '';
+
+            if (kind === 'loe') {
+                const loe = state.loeById[id];
+                if (!loe) return null;
+                return {
+                    needsRisks: false,
+                    html: '<div class="tt-title">' + escapeHtml(loe.title) + '</div>'
+                        + '<div class="tt-meta">Line of Effort</div>'
+                        + '<div class="tt-desc">' + escapeHtml(loe.description || '(no description)') + '</div>'
+                        + '<div class="tt-id">id: ' + escapeHtml(loe.id) + '</div>',
+                };
+            }
+
+            if (kind === 'theme') {
+                const theme = state.themeById[id];
+                if (!theme) return null;
+                const loe = state.loeById[theme.loeId];
+                return {
+                    needsRisks: false,
+                    html: '<div class="tt-title">' + escapeHtml(theme.title) + '</div>'
+                        + '<div class="tt-meta">Theme' + (loe ? ' &middot; ' + escapeHtml(loe.title) : '') + '</div>'
+                        + '<div class="tt-desc">' + escapeHtml(theme.description || '(no description)') + '</div>'
+                        + '<div class="tt-id">id: ' + escapeHtml(theme.id) + '</div>',
+                };
+            }
+
+            if (kind === 'activity') {
+                const a = state.activityById[id];
+                if (!a) return null;
+                const theme = state.themeById[a.themeId];
+                const loe   = theme ? state.loeById[theme.loeId] : null;
+                const dateLine = (a.start && a.end)
+                    ? (a.start.getTime() === a.end.getTime()
+                        ? formatDayMonthYear(a.start)
+                        : formatDayMonthYear(a.start) + '  -  ' + formatDayMonthYear(a.end))
+                    : '';
+                return {
+                    needsRisks: false,
+                    html: '<div class="tt-title">' + escapeHtml(a.title) + '</div>'
+                        + '<div class="tt-meta">'
+                        +     (loe   ? escapeHtml(loe.title)   + ' &middot; ' : '')
+                        +     (theme ? escapeHtml(theme.title) + ' &middot; ' : '')
+                        +     'Activity &middot; level ' + a.level
+                        + '</div>'
+                        + (dateLine ? '<div class="tt-date">' + dateLine + '</div>' : '')
+                        + '<div class="tt-desc">' + escapeHtml(a.description || '(no description)') + '</div>'
+                        + '<div class="tt-id">id: ' + escapeHtml(a.id) + '</div>',
+                };
+            }
+
+            if (kind === 'milestone') {
+                const m = state.milestoneById[id];
+                if (!m) return null;
+                const risks = state.risksByMilestone[m.id] || [];
+                const fields = buildTooltipFields([
+                    ['Owner',      m.owner],
+                    ['Priority',   m.priority],
+                    ['Confidence', formatConfidence(m.confidence)],
+                    ['Progress',   m.progress],
+                ]);
+
+                let risksHtml = '';
+                if (risks.length > 0) {
+                    risksHtml = '<div class="tt-risks-hint">' + risks.length
+                              + ' risk' + (risks.length > 1 ? 's' : '') + ' &mdash; hold or click for details</div>'
+                              + '<div class="tt-risks"><div class="tt-meta">Risks</div>';
+                    for (const r of risks) {
+                        const ragClass = r.rag ? 'rag-' + r.rag : 'rag-unknown';
+                        const meta = [r.owner, r.level ? 'L' + r.level : '', formatConfidence(r.confidence)]
+                                       .filter(s => s).join(' &middot; ');
+                        risksHtml += '<div class="tt-risk-row">'
+                                   +   '<div class="tt-risk-title">'
+                                   +     '<span class="rag-dot ' + ragClass + '"></span>'
+                                   +     escapeHtml(r.title)
+                                   +   '</div>'
+                                   + (meta ? '<div class="tt-risk-meta">' + meta + '</div>' : '')
+                                   + '</div>';
+                    }
+                    risksHtml += '</div>';
+                }
+
+                return {
+                    needsRisks: risks.length > 0,
+                    html: '<div class="tt-title">' + escapeHtml(m.title) + '</div>'
+                        + '<div class="tt-meta">Milestone</div>'
+                        + (m.date ? '<div class="tt-date">' + formatDayMonthYear(m.date) + '</div>' : '')
+                        + '<div class="tt-desc">' + escapeHtml(m.description || '(no description)') + '</div>'
+                        + fields
+                        + risksHtml
+                        + '<div class="tt-id">id: ' + escapeHtml(m.id) + '</div>',
+                };
+            }
+
+            if (kind === 'benefit') {
+                const b = state.benefits.find(x => x.id === id);
+                if (!b) return null;
+                const fields = buildTooltipFields([
+                    ['Measure',     b.measure],
+                    ['Beneficiary', b.beneficiary],
+                    ['Confidence',  formatConfidence(b.confidence)],
+                    ['Impact',      b.impact ? String(b.impact) : ''],
+                ]);
+                return {
+                    needsRisks: false,
+                    html: '<div class="tt-title">' + escapeHtml(b.title) + '</div>'
+                        + '<div class="tt-meta">Benefit</div>'
+                        + (b.date ? '<div class="tt-date">' + formatDayMonthYear(b.date) + '</div>' : '')
+                        + '<div class="tt-desc">' + escapeHtml(b.description || '(no description)') + '</div>'
+                        + fields
+                        + '<div class="tt-id">id: ' + escapeHtml(b.id) + '</div>',
+                };
+            }
+
+            return null;
+        }
+
+
         document.getElementById('body-chart').addEventListener('mousemove', (e) => {
 
             const target = e.target.closest('[data-id]');
 
             if (!target) {
                 tooltip.hidden = true;
+                tooltip.classList.remove('expanded');
+                tooltipTarget = null;
+                cancelTooltipExpand();
                 return;
             }
 
-            const item = state.byId[target.dataset.id];
+            const id = target.dataset.id;
+            if (id !== tooltipTarget) {
+                tooltipTarget = id;
+                tooltip.classList.remove('expanded');
+                cancelTooltipExpand();
 
-            if (!item) {
-                tooltip.hidden = true;
-                return;
+                const built = buildTooltipHtml(target);
+                if (!built) {
+                    tooltip.hidden = true;
+                    return;
+                }
+                tooltip.innerHTML = built.html;
+                tooltip.hidden = false;
+
+                // Two-stage milestone tooltip: after a 600ms hold,
+                // auto-expand to reveal the risks list.
+                if (built.needsRisks) {
+                    tooltipExpandTimer = setTimeout(() => {
+                        if (tooltipTarget === id) tooltip.classList.add('expanded');
+                        tooltipExpandTimer = null;
+                    }, 600);
+                }
             }
-
-            const same = item.start && item.end
-                      && item.start.getTime() === item.end.getTime();
-
-            const dateLine = same
-                ? formatMonthYear(item.start)
-                : (formatMonthYear(item.start) + '  -  ' + formatMonthYear(item.end));
-
-            const levelText = item.isBenefit
-                ? 'benefit'
-                : ('level ' + item.level + (item.isPoint && item.parentId ? ' (point)' : ''));
-            const confText  = item.confidence
-                ? ({ h: 'high', m: 'medium', l: 'low' })[item.confidence] + ' confidence'
-                : null;
-
-            tooltip.innerHTML =
-                '<div class="tt-title">' + escapeHtml(item.title) + '</div>'
-              + '<div class="tt-meta">'
-              +     escapeHtml(item.theme) + ' &middot; '
-              +     escapeHtml(item.type)  + ' &middot; '
-              +     levelText
-              +     (confText ? ' &middot; ' + escapeHtml(confText) : '')
-              + '</div>'
-              + '<div class="tt-date">' + dateLine + '</div>'
-              + '<div class="tt-desc">'
-              +     escapeHtml(item.description || '(no description)')
-              + '</div>';
-
-            tooltip.hidden = false;
 
             // Position with edge avoidance.
-            const pad   = 14;
-            const tw    = tooltip.offsetWidth;
-            const th    = tooltip.offsetHeight;
-            const vw    = window.innerWidth;
-            const vh    = window.innerHeight;
+            const pad = 14;
+            const tw  = tooltip.offsetWidth;
+            const th  = tooltip.offsetHeight;
+            const vw  = window.innerWidth;
+            const vh  = window.innerHeight;
 
             let left = e.clientX + pad;
             let top  = e.clientY + pad;
-
             if (left + tw + pad > vw) left = e.clientX - tw - pad;
             if (top  + th + pad > vh) top  = e.clientY - th - pad;
 
@@ -2521,6 +3150,9 @@
 
         document.getElementById('body-chart').addEventListener('mouseleave', () => {
             tooltip.hidden = true;
+            tooltip.classList.remove('expanded');
+            tooltipTarget = null;
+            cancelTooltipExpand();
         });
 
 
@@ -2529,7 +3161,7 @@
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimer);
             resizeTimer = setTimeout(() => {
-                if (state.items.length > 0) render();
+                if (state.activities.length > 0) render();
             }, 150);
         });
 
