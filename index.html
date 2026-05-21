@@ -512,6 +512,31 @@
             overflow-wrap: anywhere;
         }
 
+
+        /*
+         * "More info" toggle lines in the left header column, one
+         * per child-bearing point-overlay. The whole line is a
+         * hit-target so clicks anywhere on it expand/collapse the
+         * overlay's grandchild rows.
+         */
+        .more-info-toggle { cursor: pointer; }
+        .more-info-bg     { fill: transparent; transition: fill 120ms ease; }
+        .more-info-toggle:hover .more-info-bg { fill: rgba(255, 255, 255, 0.05); }
+
+        .more-info-label {
+            color: var(--fg-muted);
+            font-family: inherit;
+            font-style: italic;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            user-select: none;
+            pointer-events: none;
+            transition: color 120ms ease;
+        }
+        .more-info-toggle:hover .more-info-label { color: var(--fg); }
+        .more-info-toggle.expanded .more-info-label { color: var(--fg); }
+
         /*
          * The end-marker on a type=benefit numbered range row sits at
          * the right edge of the gantt block.
@@ -928,6 +953,14 @@
             benefitZoneHeight:  { 1: 28, 2: 26, 3: 22 },
             benefitDiamondSize: { 1: 8,  2: 6,  3: 5  },
             benefitFontSize:    { 1: 11, 2: 10, 3: 9  },
+
+            // One line per child-bearing point-overlay (a level n+1
+            // point-milestone whose own level n+2 sub-rows would
+            // otherwise be unreachable). Drawn in the left header
+            // column underneath the diamond-label zone, with a
+            // triangle that toggles the children's visibility.
+            moreInfoLineHeight: { 1: 22, 2: 20, 3: 18 },
+            moreInfoFontSize:   { 1: 12, 2: 11, 3: 10 },
 
             // Auto-fit floor: the chart will not scale rows below this
             // fraction of their natural height even if content exceeds
@@ -1434,8 +1467,24 @@
 
             function pushWithChildren(item) {
 
-                if (isOverlay(item))      return;   // drawn on parent's bar
                 if (!passesFilters(item)) return;
+
+                if (isOverlay(item)) {
+                    // Overlays draw on the parent's bar instead of
+                    // taking a row of their own. But a point-overlay
+                    // can still have child rows (e.g. a level-2
+                    // milestone with level-3 sub-items); when its
+                    // own "More info" toggle is expanded, surface
+                    // those children as rows below the parent.
+                    if (!item.isBenefit
+                        && item.childIds.length > 0
+                        && state.expanded.has(item.id)) {
+                        for (const childId of item.childIds) {
+                            pushWithChildren(state.byId[childId]);
+                        }
+                    }
+                    return;
+                }
 
                 out.push(item);
 
@@ -1443,6 +1492,9 @@
 
                 for (const childId of item.childIds) {
                     pushWithChildren(state.byId[childId]);
+                }
+                for (const overlayId of item.overlayIds) {
+                    pushWithChildren(state.byId[overlayId]);
                 }
             }
 
@@ -1641,12 +1693,24 @@
                 }
             }
 
+            // Child-bearing overlays of this row that need a
+            // "More info" toggle line in the left column.
+            function childBearingOverlaysOf(it) {
+                return visibleOverlays[it.id].filter(ov =>
+                    !ov.isBenefit && ov.childIds.length > 0
+                );
+            }
+
             const naturalBody = LAYOUT.bodyMarginTop
                 + themeRunCount * LAYOUT.themeHeaderHeight
                 + visible.reduce((s, it) => {
                     let h = LAYOUT.rowHeight[it.level];
                     if (visibleOverlays[it.id].length > 0 && state.expanded.has(it.id)) {
                         h += LAYOUT.benefitZoneHeight[it.level];
+                    }
+                    if (state.expanded.has(it.id)) {
+                        h += childBearingOverlaysOf(it).length
+                           * LAYOUT.moreInfoLineHeight[it.level];
                     }
                     return s + h;
                 }, 0)
@@ -1677,6 +1741,8 @@
                 benefitZoneHeight: scaleMap(LAYOUT.benefitZoneHeight),
                 benefitDiamondSize:scaleMap(LAYOUT.benefitDiamondSize),
                 benefitFontSize:   scaleMap(LAYOUT.benefitFontSize),
+                moreInfoLineHeight:scaleMap(LAYOUT.moreInfoLineHeight),
+                moreInfoFontSize:  scaleMap(LAYOUT.moreInfoFontSize),
                 themeHeaderHeight: LAYOUT.themeHeaderHeight * scale,
                 themeFontSize:     15 * Math.max(scale, 0.75),
             };
@@ -1685,7 +1751,8 @@
             // --- Vertical layout (in body-SVG coords; axis is separate) ---
 
             const rowY       = {};
-            const rowHTotal  = {};        // total height per row (bar zone + benefit zone)
+            const rowHTotal  = {};        // total height per row (bar zone + benefit zone + more-info lines)
+            const moreInfoZ  = {};        // per row: height reserved for "More info" toggle lines
             const themeBands = [];        // [{ theme, headerY, yTop, yBot }]
 
             let y           = LAYOUT.bodyMarginTop;
@@ -1713,10 +1780,26 @@
                     ? sized.benefitZoneHeight[it.level]
                     : 0;
 
-                rowY[it.id]      = y;
-                rowHTotal[it.id] = barZ + benZ;
+                const childBearing = state.expanded.has(it.id)
+                    ? childBearingOverlaysOf(it)
+                    : [];
+                const moreLineH = sized.moreInfoLineHeight[it.level];
+                const moreZ     = childBearing.length * moreLineH;
 
-                y += barZ + benZ;
+                rowY[it.id]      = y;
+                rowHTotal[it.id] = barZ + benZ + moreZ;
+                moreInfoZ[it.id] = moreZ;
+
+                // Each child-bearing overlay's "More info" line acts
+                // as the visual parent of its level n+2 child rows;
+                // record its absolute Y so the connector pass below
+                // can draw from the toggle line down to each child.
+                childBearing.forEach((ov, idx) => {
+                    rowY[ov.id]      = y + barZ + benZ + idx * moreLineH;
+                    rowHTotal[ov.id] = moreLineH;
+                });
+
+                y += barZ + benZ + moreZ;
             }
             if (currentBand) currentBand.yBot = y;
 
@@ -2072,6 +2155,73 @@
                         rowG.appendChild(ofo);
                     }
                 }
+
+
+                // "More info" toggle lines: one per child-bearing
+                // point-overlay (a sub-milestone with its own further
+                // sub-rows). Drawn in the left header column, stacked
+                // below the diamond-label zone, so the otherwise-hidden
+                // grandchildren of a level-2 point can be revealed.
+                if (isExp && moreInfoZ[it.id] > 0) {
+
+                    const moreLineH  = sized.moreInfoLineHeight[it.level];
+                    const moreBaseY  = barZone
+                                     + (overlays.length > 0 ? sized.benefitZoneHeight[it.level] : 0);
+                    const moreFs     = sized.moreInfoFontSize[it.level];
+                    const childBearingOvs = visibleOverlays[it.id].filter(ov =>
+                        !ov.isBenefit && ov.childIds.length > 0
+                    );
+
+                    childBearingOvs.forEach((ov, idx) => {
+
+                        const lineY    = moreBaseY + idx * moreLineH;
+                        const ovIndent = (ov.level - 1) * LAYOUT.labelIndent;
+                        const ovTriX   = LAYOUT.labelLeftPad + ovIndent;
+                        const ovLblX   = ovTriX + LAYOUT.triangleGap;
+                        const ovExp    = state.expanded.has(ov.id);
+
+                        const tog = svgEl('g', {
+                            class: 'more-info-toggle' + (ovExp ? ' expanded' : ''),
+                            'data-overlay-id': ov.id,
+                        });
+                        rowG.appendChild(tog);
+
+                        // Wide invisible hit-rect so clicks anywhere
+                        // on the line toggle this overlay's children.
+                        tog.appendChild(svgEl('rect', {
+                            class: 'more-info-bg',
+                            x: 0, y: lineY,
+                            width: labelAreaEnd,
+                            height: moreLineH,
+                        }));
+
+                        const tri = svgEl('text', {
+                            class: 'expand-icon',
+                            x: ovTriX,
+                            y: lineY + moreLineH / 2 + moreFs / 3,
+                            'font-size': moreFs,
+                        });
+                        tri.textContent = ovExp ? '▾' : '▸';
+                        tog.appendChild(tri);
+
+                        const mfo = svgEl('foreignObject', {
+                            'data-id': ov.id,
+                            x: ovLblX,
+                            y: lineY,
+                            width:  Math.max(20, labelAreaEnd - ovLblX),
+                            height: moreLineH,
+                        });
+
+                        const mlbl = document.createElementNS(XHTML_NS, 'div');
+                        mlbl.setAttribute('class', 'more-info-label');
+                        mlbl.style.fontSize   = moreFs + 'px';
+                        mlbl.style.lineHeight = String(moreLineH) + 'px';
+                        mlbl.textContent      = 'More info: ' + ov.title;
+
+                        mfo.appendChild(mlbl);
+                        tog.appendChild(mfo);
+                    });
+                }
             }
 
 
@@ -2260,6 +2410,19 @@
 
 
         document.getElementById('body-chart').addEventListener('click', (e) => {
+
+            // "More info" toggle for a child-bearing point-overlay -
+            // takes priority over both the overlay-click suppression
+            // (the toggle's foreignObject carries the overlay's
+            // data-id for tooltip purposes) and the row toggle.
+            const more = e.target.closest('.more-info-toggle');
+            if (more) {
+                const ovid = more.dataset.overlayId;
+                if (state.expanded.has(ovid)) state.expanded.delete(ovid);
+                else                          state.expanded.add(ovid);
+                render();
+                return;
+            }
 
             // Overlay items (benefits + point-children) aren't
             // expandable; a click on one should just leave the tooltip
