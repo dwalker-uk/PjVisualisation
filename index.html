@@ -275,6 +275,32 @@
         .swatch.impact-2 { background: var(--impact-2); }
         .swatch.impact-3 { background: var(--impact-3); }
 
+        /* RAG dropdown panel - colour dots beside the labels so the
+           red/amber/green options are recognisable at a glance. */
+        .dropdown-panel label .rag-dot {
+            width: 11px;
+            height: 11px;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+        }
+
+        /* Category dropdown can grow long - cap height and scroll. */
+        .dropdown-panel.category-toggles {
+            max-height: 50vh;
+            overflow-y: auto;
+            max-width: 300px;
+        }
+
+        /* "Only with risk/benefit" toggle in the toolbar. */
+        .toolbar-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--fg);
+            font-size: 13px;
+            cursor: pointer;
+            user-select: none;
+        }
+
 
         /* Two-level filter list inside a dropdown: LOE header lines
            sit above their themes, themes indent under them. */
@@ -889,6 +915,29 @@
 
         <div class="dropdown">
             <button type="button" class="dropdown-btn">
+                Risks
+                <span class="dropdown-count" id="rag-count">0/0</span>
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel rag-toggles" hidden></div>
+        </div>
+
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
+                Benefits
+                <span class="dropdown-count" id="category-count">0/0</span>
+                <span class="dropdown-chevron">&#9662;</span>
+            </button>
+            <div class="dropdown-panel category-toggles" hidden></div>
+        </div>
+
+        <label class="toolbar-toggle" title="Hide activities that have no risk or benefit (after the Risks / Benefits filters above are applied)">
+            <input type="checkbox" id="hide-without-rb">
+            <span>Only with risk / benefit</span>
+        </label>
+
+        <div class="dropdown">
+            <button type="button" class="dropdown-btn">
                 Expand
                 <span class="dropdown-chevron">&#9662;</span>
             </button>
@@ -997,9 +1046,22 @@
             // Activities whose own row is expanded to reveal children.
             expanded:         new Set(),
 
-            // Filter sets - checked LOE / Theme ids.
+            // Unique benefit categories collected from the Benefits
+            // sheet (in display order). The special key
+            // '__uncategorised__' covers rows whose Category cell is
+            // empty / missing.
+            categories:       [],
+
+            // Filter sets - checked LOE / Theme ids, RAG keys
+            // ('r'/'a'/'g'/'unknown'), and benefit category keys.
             loeFilter:        new Set(),
             themeFilter:      new Set(),
+            ragFilter:        new Set(['r', 'a', 'g', 'unknown']),
+            categoryFilter:   new Set(),
+
+            // When true, activities with no visible (post-filter) risk
+            // or benefit (on themselves or any descendant) are hidden.
+            hideActivitiesWithoutRiskBenefit: false,
 
             // Date-range filter: first-of-month Dates, or null when
             // the data has no usable dates at all. They default to the
@@ -1248,8 +1310,12 @@
             state.benefitsByActivity   = {};
             state.risksByMilestone     = {};
             state.expanded             = new Set();
+            state.categories           = [];
             state.loeFilter            = new Set();
             state.themeFilter          = new Set();
+            state.ragFilter            = new Set(['r', 'a', 'g', 'unknown']);
+            state.categoryFilter       = new Set();
+            state.hideActivitiesWithoutRiskBenefit = false;
             state.dateStart            = null;
             state.dateEnd              = null;
             state.dataDateMin          = null;
@@ -1406,6 +1472,7 @@
                 beneficiary: ['beneficiary'],
                 confidence:  ['confidence', 'conf'],
                 impact:      ['impact'],
+                category:    ['category', 'benefit category', 'type'],
             },
             risks: {
                 milestoneId: ['milestone id'],
@@ -1414,8 +1481,6 @@
                 description: ['description', 'summary', 'notes'],
                 owner:       ['owner'],
                 rag:         ['rag', 'status'],
-                confidence:  ['confidence', 'conf'],
-                level:       ['level'],
             },
         };
 
@@ -1446,6 +1511,36 @@
             const n = parseInt(raw, 10);
             if (n === 1 || n === 2 || n === 3) return n;
             return 3;
+        }
+
+
+        // RAG filter sets store 'r'/'a'/'g' plus the literal 'unknown'
+        // for risks with a missing / unrecognised RAG cell. Helpers
+        // convert between a risk's stored rag (null or letter) and the
+        // string used as a Set key.
+        function ragKey(rag) {
+            return rag === 'r' || rag === 'a' || rag === 'g' ? rag : 'unknown';
+        }
+
+        function ragLabel(key) {
+            if (key === 'r') return 'Red';
+            if (key === 'a') return 'Amber';
+            if (key === 'g') return 'Green';
+            return 'Unknown';
+        }
+
+
+        // Benefit-category keys: '__uncategorised__' for empty cells,
+        // otherwise the trimmed string as-typed in the sheet.
+        const UNCATEGORISED_KEY = '__uncategorised__';
+
+        function categoryKey(cat) {
+            const s = (cat == null ? '' : String(cat)).trim();
+            return s === '' ? UNCATEGORISED_KEY : s;
+        }
+
+        function categoryLabel(key) {
+            return key === UNCATEGORISED_KEY ? '(Uncategorised)' : key;
         }
 
 
@@ -1612,6 +1707,7 @@
                         beneficiary: cellStr(row, ci.beneficiary),
                         confidence:  normaliseConfidence(row[ci.confidence]),
                         impact:      normaliseImpact(row[ci.impact]),
+                        category:    cellStr(row, ci.category),
                     };
                 });
 
@@ -1627,8 +1723,6 @@
                         description: cellStr(row, ci.description),
                         owner:       cellStr(row, ci.owner),
                         rag:         normaliseRag(row[ci.rag]),
-                        confidence:  normaliseConfidence(row[ci.confidence]),
-                        level:       cellStr(row, ci.level),
                     };
                 });
 
@@ -1816,10 +1910,34 @@
             state.dateEnd     = dMax;
 
 
+            // ---- Collate benefit categories from the loaded rows -------
+            // The Category column is free-text; we just collect the
+            // distinct values (case-preserving) for the filter dropdown.
+            {
+                const seen = new Set();
+                const out  = [];
+                for (const b of state.benefits) {
+                    const key = categoryKey(b.category);
+                    if (seen.has(key)) continue;
+                    seen.add(key);
+                    out.push(key);
+                }
+                out.sort((a, b) => {
+                    if (a === UNCATEGORISED_KEY) return 1;
+                    if (b === UNCATEGORISED_KEY) return -1;
+                    return a.localeCompare(b);
+                });
+                state.categories = out;
+            }
+
+
             // ---- Initial filter sets - everything checked --------------
 
-            state.loeFilter   = new Set(state.loes.map(l => l.id));
-            state.themeFilter = new Set(state.themes.map(t => t.id));
+            state.loeFilter      = new Set(state.loes.map(l => l.id));
+            state.themeFilter    = new Set(state.themes.map(t => t.id));
+            state.ragFilter      = new Set(['r', 'a', 'g', 'unknown']);
+            state.categoryFilter = new Set(state.categories);
+            state.hideActivitiesWithoutRiskBenefit = false;
         }
 
 
@@ -1901,6 +2019,39 @@
          * ================================================================
          */
 
+        // Risk / benefit filter predicates. Risks are gated by RAG,
+        // benefits by Category. Activities are gated indirectly by
+        // these via the "only with risk / benefit" toggle.
+        function riskPasses(r)    { return state.ragFilter.has(ragKey(r.rag)); }
+        function benefitPasses(b) { return state.categoryFilter.has(categoryKey(b.category)); }
+
+        function visibleRisksFor(milestone) {
+            return (state.risksByMilestone[milestone.id] || []).filter(riskPasses);
+        }
+
+        // True if this activity (or any of its descendants in the
+        // expand tree) has at least one risk or benefit that survives
+        // the current Risks / Benefits filters. Walked recursively so
+        // a collapsed parent stays visible when only a child has the
+        // matching item.
+        function activityOrDescendantsHasVisibleRiskOrBenefit(activity) {
+            const benefits = state.benefitsByActivity[activity.id] || [];
+            for (const b of benefits) if (benefitPasses(b)) return true;
+
+            const milestones = state.milestonesByActivity[activity.id] || [];
+            for (const m of milestones) {
+                const risks = state.risksByMilestone[m.id] || [];
+                for (const r of risks) if (riskPasses(r)) return true;
+            }
+
+            for (const cid of activity.childIds) {
+                const child = state.activityById[cid];
+                if (child && activityOrDescendantsHasVisibleRiskOrBenefit(child)) return true;
+            }
+            return false;
+        }
+
+
         // Does this activity pass all currently-active filters? Only
         // activities take rows in the chart; milestones and benefits
         // inherit visibility from their parent activity.
@@ -1918,6 +2069,11 @@
             // not affected.
             if (state.dateStart && activity.end   && activity.end   < state.dateStart) return false;
             if (state.dateEnd   && activity.start && activity.start > state.dateEnd)   return false;
+
+            if (state.hideActivitiesWithoutRiskBenefit
+                && !activityOrDescendantsHasVisibleRiskOrBenefit(activity)) {
+                return false;
+            }
 
             return true;
         }
@@ -1974,11 +2130,13 @@
 
 
         // Diamond + star markers that overlay an activity's bar. Milestones
-        // are diamonds; benefits are stars coloured by impact.
+        // are diamonds; benefits are stars coloured by impact. Benefits
+        // are pre-filtered by the Category filter so the chart matches
+        // what the user has toggled on.
         function visibleOverlaysFor(activity) {
             return {
                 milestones: (state.milestonesByActivity[activity.id] || []),
-                benefits:   (state.benefitsByActivity[activity.id]   || []),
+                benefits:   (state.benefitsByActivity[activity.id]   || []).filter(benefitPasses),
             };
         }
 
@@ -2676,6 +2834,16 @@
             const themeOn    = Array.from(themeBoxes).filter(b => b.checked).length;
             document.getElementById('theme-count').textContent =
                 themeOn + '/' + themeBoxes.length;
+
+            const ragBoxes = document.querySelectorAll('.rag-toggles input[type="checkbox"]');
+            const ragOn    = Array.from(ragBoxes).filter(b => b.checked).length;
+            document.getElementById('rag-count').textContent =
+                ragOn + '/' + ragBoxes.length;
+
+            const catBoxes = document.querySelectorAll('.category-toggles input[type="checkbox"]');
+            const catOn    = Array.from(catBoxes).filter(b => b.checked).length;
+            document.getElementById('category-count').textContent =
+                catOn + '/' + catBoxes.length;
         }
 
 
@@ -2753,6 +2921,74 @@
                     });
                 }
             }
+
+
+            // ---- RAG (Risks) panel ---------------------------------------
+            const ragPanel = document.querySelector('.rag-toggles');
+            ragPanel.innerHTML = '';
+            for (const key of ['r', 'a', 'g', 'unknown']) {
+                const lbl = document.createElement('label');
+                const cb  = document.createElement('input');
+                cb.type = 'checkbox';
+                cb.dataset.ragKey = key;
+                cb.checked = state.ragFilter.has(key);
+
+                const dot = document.createElement('span');
+                dot.className = 'rag-dot rag-' + (key === 'unknown' ? 'unknown' : key);
+
+                const span = document.createElement('span');
+                span.textContent = ragLabel(key);
+
+                lbl.appendChild(cb);
+                lbl.appendChild(dot);
+                lbl.appendChild(span);
+                ragPanel.appendChild(lbl);
+
+                cb.addEventListener('change', () => {
+                    if (cb.checked) state.ragFilter.add(key);
+                    else            state.ragFilter.delete(key);
+                    updateFilterCounts();
+                    render();
+                });
+            }
+
+
+            // ---- Benefit Category panel ---------------------------------
+            const catPanel = document.querySelector('.category-toggles');
+            catPanel.innerHTML = '';
+            if (state.categories.length === 0) {
+                const note = document.createElement('div');
+                note.className = 'dropdown-section';
+                note.textContent = 'No benefits loaded';
+                catPanel.appendChild(note);
+            } else {
+                for (const key of state.categories) {
+                    const lbl = document.createElement('label');
+                    const cb  = document.createElement('input');
+                    cb.type = 'checkbox';
+                    cb.dataset.categoryKey = key;
+                    cb.checked = state.categoryFilter.has(key);
+
+                    const span = document.createElement('span');
+                    span.textContent = categoryLabel(key);
+
+                    lbl.appendChild(cb);
+                    lbl.appendChild(span);
+                    catPanel.appendChild(lbl);
+
+                    cb.addEventListener('change', () => {
+                        if (cb.checked) state.categoryFilter.add(key);
+                        else            state.categoryFilter.delete(key);
+                        updateFilterCounts();
+                        render();
+                    });
+                }
+            }
+
+
+            // ---- "Only with risk / benefit" toggle ----------------------
+            const hideCb = document.getElementById('hide-without-rb');
+            hideCb.checked = state.hideActivitiesWithoutRiskBenefit;
 
             updateFilterCounts();
         }
@@ -2903,6 +3139,12 @@
         });
 
 
+        document.getElementById('hide-without-rb').addEventListener('change', (e) => {
+            state.hideActivitiesWithoutRiskBenefit = e.target.checked;
+            render();
+        });
+
+
         // --- Row expand/collapse on click ---
 
         document.getElementById('body-chart').addEventListener('click', (e) => {
@@ -3031,7 +3273,7 @@
             if (kind === 'milestone') {
                 const m = state.milestoneById[id];
                 if (!m) return null;
-                const risks = state.risksByMilestone[m.id] || [];
+                const risks = visibleRisksFor(m);
                 const fields = buildTooltipFields([
                     ['Owner',      m.owner],
                     ['Priority',   m.priority],
@@ -3046,14 +3288,12 @@
                               + '<div class="tt-risks"><div class="tt-meta">Risks</div>';
                     for (const r of risks) {
                         const ragClass = r.rag ? 'rag-' + r.rag : 'rag-unknown';
-                        const meta = [r.owner, r.level ? 'L' + r.level : '', formatConfidence(r.confidence)]
-                                       .filter(s => s).join(' &middot; ');
                         risksHtml += '<div class="tt-risk-row">'
                                    +   '<div class="tt-risk-title">'
                                    +     '<span class="rag-dot ' + ragClass + '"></span>'
                                    +     escapeHtml(r.title)
                                    +   '</div>'
-                                   + (meta ? '<div class="tt-risk-meta">' + meta + '</div>' : '')
+                                   + (r.owner ? '<div class="tt-risk-meta">' + escapeHtml(r.owner) + '</div>' : '')
                                    + '</div>';
                     }
                     risksHtml += '</div>';
@@ -3075,6 +3315,7 @@
                 const b = state.benefits.find(x => x.id === id);
                 if (!b) return null;
                 const fields = buildTooltipFields([
+                    ['Category',    b.category],
                     ['Measure',     b.measure],
                     ['Beneficiary', b.beneficiary],
                     ['Confidence',  formatConfidence(b.confidence)],
