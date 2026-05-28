@@ -1,0 +1,1507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Programme Roadmap</title>
+
+<!--
+  Programme / Project Roadmap visualiser.
+
+  Standalone single-file app. The only external dependency is SheetJS, loaded
+  from a CDN at runtime to parse the Excel workbook. Everything else (data
+  modelling, layout, SVG rendering, interaction) lives in this file and is
+  written to be read and edited by a human.
+
+  Data is read from an Excel workbook with this shape (all values in tables):
+    - Sheet "LOEs & Themes": an LOEs table (LOE ID, Title) near the top of
+      column A, and a Themes table (LOE ID, Theme ID, Title, Description) a few
+      rows below it, also in column A.
+    - Sheet "Activities":  Theme ID, Activity ID, UniqueAct ID, Level, Title,
+                           Description, Start Date, End Date, Resourcing
+    - Sheet "Milestones":  Activity ID, UniqueMSt ID, Milestone Title,
+                           Description, Date, Owner, Delivery Confidence
+    - Sheet "Benefits":    Milestone ID, Benefit Title, Category, Beneficiary, Impact
+    - Sheet "Risks":       Milestone ID, Risk Title, Risk Owner, RAG
+    - Sheet "Lookups":     a table anchored at cell F1 driving list-value colours.
+
+  The Activity hierarchy is encoded in the dash-delimited Activity ID
+  ("Top" -> "Top-First" -> "Top-First-ABC"); UniqueAct ID is the primary key.
+-->
+
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<style>
+  :root {
+    /* Brand palette */
+    --bg:        #071D49;   /* dark blue background */
+    --bg-2:      #0c2a63;   /* raised panels */
+    --bg-3:      #103371;   /* inputs */
+    --border:    #2a4a86;
+    --fg:        #ffffff;   /* primary text */
+    --fg-muted:  #b9c6e4;
+    --fg-dim:    #7e93c4;
+    --secondary: #D41F41;   /* red */
+
+    /* Accents */
+    --blue:   #59ACDA;
+    --orange: #E08D48;
+    --yellow: #F4C748;
+    --pink:   #CF8DB7;
+    --green:  #79C68A;
+    --purple: #A496D7;
+
+    --neutral: #8aa0cc;     /* fallback bar / marker colour */
+
+    --bar-h: 52px;          /* config bar height, kept in sync from JS */
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+    font-size: 14px;
+  }
+
+  /* ---- Bootstrap / load screen ---- */
+  #loader {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .load-card {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 36px 40px;
+    max-width: 560px;
+    text-align: center;
+    box-shadow: 0 18px 60px rgba(0,0,0,.45);
+  }
+  .load-card h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: .3px; }
+  .load-card p  { margin: 6px 0 20px; color: var(--fg-muted); line-height: 1.5; }
+  .btn {
+    display: inline-block;
+    background: var(--secondary);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    padding: 11px 22px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn.secondary { background: var(--bg-3); border: 1px solid var(--border); }
+  .hint { font-size: 12px; color: var(--fg-dim); margin-top: 14px; }
+
+  /* ---- Config bar ---- */
+  #config-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 100;
+    min-height: var(--bar-h);
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 8px 18px;
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { font-weight: 700; letter-spacing: .4px; margin-right: 4px; white-space: nowrap; }
+  .brand .accent { color: var(--secondary); }
+
+  .ctl { display: flex; align-items: center; gap: 7px; white-space: nowrap; }
+  .ctl > label.lbl { color: var(--fg-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
+
+  input[type="month"], select {
+    background: var(--bg-3);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 7px;
+    font: inherit;
+  }
+  .dash { color: var(--fg-dim); }
+
+  .toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; color: var(--fg-muted); }
+  .toggle input { accent-color: var(--secondary); width: 15px; height: 15px; }
+
+  .link { color: var(--blue); cursor: pointer; font-size: 12px; text-decoration: none; }
+  .link:hover { text-decoration: underline; }
+
+  /* ---- Multi-select dropdowns ---- */
+  .dropdown { position: relative; }
+  .dropdown-btn {
+    background: var(--bg-3);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font: inherit;
+  }
+  .dropdown-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 200;
+    min-width: 230px;
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .dropdown-panel[hidden] { display: none; }
+  .dropdown-panel label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+  .dropdown-panel label:hover { background: var(--bg-3); }
+  .dropdown-panel label.indent { padding-left: 22px; color: var(--fg-muted); }
+  .dropdown-panel input { accent-color: var(--secondary); }
+  .dropdown-section { margin-top: 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--fg-dim); padding: 4px 6px 2px; }
+
+  .warn-badge {
+    margin-left: auto;
+    background: rgba(212,31,65,.18);
+    border: 1px solid var(--secondary);
+    color: #ffd2da;
+    border-radius: 14px;
+    padding: 3px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .warn-badge[hidden] { display: none; }
+
+  /* ---- Chart ---- */
+  #chart-wrap {
+    padding-top: var(--bar-h);
+    min-width: 100%;
+    width: max-content;
+  }
+  #axis-chart {
+    display: block;
+    position: sticky;
+    top: var(--bar-h);
+    z-index: 50;
+    background: var(--bg);
+  }
+  #body-chart { display: block; }
+
+  /* SVG element styling */
+  .grid-line     { stroke: rgba(255,255,255,.06); stroke-width: 1; }
+  .grid-line.year{ stroke: rgba(255,255,255,.14); }
+  .axis-month    { fill: var(--fg-muted); font-size: 12px; text-anchor: middle; }
+  .axis-year     { fill: var(--fg); font-size: 13px; font-weight: 700; text-anchor: start; }
+  .axis-today    { stroke: var(--secondary); stroke-width: 1.5; stroke-dasharray: 4 3; }
+
+  .loe-band-a { fill: rgba(255,255,255,.025); }
+  .loe-band-b { fill: rgba(255,255,255,.000); }
+  .loe-text   { fill: var(--fg); font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+  .loe-divider{ stroke: var(--border); stroke-width: 1; }
+
+  .theme-block { fill: var(--bg-2); }
+  .theme-text  { fill: var(--fg); font-weight: 600; letter-spacing: .8px; }
+  .theme-desc  { fill: var(--fg-dim); }
+
+  .row-label   { color: var(--fg); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
+  .expand-icon { fill: var(--fg-muted); cursor: pointer; user-select: none; }
+  .row.expandable { cursor: pointer; }
+
+  .bar        { rx: 4; ry: 4; }
+  .bar-stroke { fill: none; stroke: rgba(0,0,0,.25); }
+  .connector  { stroke: var(--fg-dim); stroke-width: 1; fill: none; opacity: .5; }
+
+  .marker        { stroke: rgba(0,0,0,.35); stroke-width: 1; cursor: pointer; }
+  .marker:hover  { stroke: #fff; stroke-width: 1.5; }
+  .risk-icon     { cursor: pointer; }
+  .risk-glyph    { fill: #1a0a0a; font-size: 9px; font-weight: 800; text-anchor: middle; }
+  .marker-label  { color: var(--fg-muted); font-size: 10px; text-align: center; line-height: 1.1;
+                   overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+  /* ---- Tooltip ---- */
+  #tooltip {
+    position: fixed;
+    z-index: 10000;
+    pointer-events: none;
+    max-width: 320px;
+    background: rgba(7,20,52,.97);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 13px;
+    box-shadow: 0 10px 34px rgba(0,0,0,.55);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  #tooltip[hidden] { display: none; }
+  #tooltip h4 { margin: 0 0 4px; font-size: 14px; }
+  #tooltip .tt-sec { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--border); }
+  #tooltip .tt-sec.benefit { border-color: var(--yellow); }
+  #tooltip .tt-sec.risk    { border-color: var(--secondary); }
+  #tooltip .tt-label { color: var(--fg-dim); }
+  #tooltip .tt-tag {
+    display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 10px;
+    color: #08152e; font-weight: 700; margin-left: 4px;
+  }
+  #tooltip .tt-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--fg-dim); }
+
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Load screen -->
+<div id="loader">
+  <div class="load-card">
+    <h1>Programme Roadmap</h1>
+    <p>Load an Excel workbook to build the roadmap. The file stays on your
+       device &mdash; nothing is uploaded.</p>
+    <button class="btn" id="pick-file">Choose Excel file&hellip;</button>
+    <input type="file" id="file-input" accept=".xlsx,.xlsm,.xls" hidden>
+    <div class="hint" id="load-status"></div>
+  </div>
+</div>
+
+<!-- Config bar (built/shown after load) -->
+<div id="config-bar" hidden>
+  <span class="brand">Road<span class="accent">map</span></span>
+
+  <div class="ctl">
+    <label class="lbl">Dates</label>
+    <input type="month" id="date-start" aria-label="Start month">
+    <span class="dash">&ndash;</span>
+    <input type="month" id="date-end" aria-label="End month">
+    <a class="link" id="date-reset" title="Reset to a 12-month window from today">reset</a>
+  </div>
+
+  <div class="ctl dropdown" id="loe-dropdown">
+    <button class="dropdown-btn" id="loe-btn">LOEs: all &#9662;</button>
+    <div class="dropdown-panel" id="loe-panel" hidden></div>
+  </div>
+
+  <div class="ctl dropdown" id="theme-dropdown">
+    <button class="dropdown-btn" id="theme-btn">Themes: all &#9662;</button>
+    <div class="dropdown-panel" id="theme-panel" hidden></div>
+  </div>
+
+  <label class="toggle"><input type="checkbox" id="only-benefit"><span>Only with benefit</span></label>
+  <label class="toggle"><input type="checkbox" id="only-risk"><span>Only with risk</span></label>
+  <label class="toggle"><input type="checkbox" id="show-mst-labels"><span>Milestone labels</span></label>
+
+  <a class="link" id="reload-file">load another file</a>
+
+  <span class="warn-badge" id="warn-badge" hidden></span>
+</div>
+
+<div id="chart-wrap" hidden>
+  <svg id="axis-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+  <svg id="body-chart" xmlns="http://www.w3.org/2000/svg"></svg>
+</div>
+
+<div id="tooltip" hidden></div>
+
+<script>
+/* ===================================================================== *
+ *  PURE-DATA-LAYER START
+ *
+ *  Everything between these markers is free of DOM / SheetJS dependencies
+ *  and operates only on plain arrays-of-arrays (AOA) and JS values, so it
+ *  can be unit-tested directly under Node. The browser code below builds
+ *  the AOA inputs from the workbook and calls assembleModel().
+ * ===================================================================== */
+
+/* Named colours -> brand palette; anything else falls through to a literal
+   CSS colour (so "grey", "white", "black" etc. still work). */
+var BRAND_COLOURS = {
+  blue:   '#59ACDA',
+  orange: '#E08D48',
+  amber:  '#E08D48',
+  yellow: '#F4C748',
+  gold:   '#F4C748',
+  pink:   '#CF8DB7',
+  green:  '#79C68A',
+  purple: '#A496D7',
+  violet: '#A496D7',
+  red:    '#D41F41',
+  navy:   '#071D49'
+};
+
+/* Default colour cycle used when a Lookups column specifies no colours. */
+var DEFAULT_PALETTE = ['#59ACDA', '#79C68A', '#F4C748', '#E08D48', '#CF8DB7', '#A496D7'];
+
+var NEUTRAL_COLOUR = '#8aa0cc';
+
+/* Column aliases per entity (lower-cased). The first match wins. */
+var ALIASES = {
+  loes:       { id: ['loe id'], title: ['title', 'name'] },
+  themes:     { loeId: ['loe id'], id: ['theme id'], title: ['title', 'name'], description: ['description'] },
+  activities: {
+    themeId: ['theme id'], actId: ['activity id'], uid: ['uniqueact id', 'unique act id', 'uniqueactid'],
+    level: ['level'], title: ['title', 'name'], description: ['description'],
+    start: ['start date', 'start'], end: ['end date', 'end'], resourcing: ['resourcing']
+  },
+  milestones: {
+    activityUid: ['activity id'], uid: ['uniquemst id', 'unique mst id', 'uniquemstid'],
+    title: ['milestone title', 'title'], description: ['description'], date: ['date'],
+    owner: ['owner'], confidence: ['delivery confidence', 'confidence']
+  },
+  benefits:   {
+    milestoneUid: ['milestone id'], title: ['benefit title', 'title'],
+    category: ['category'], beneficiary: ['beneficiary'], impact: ['impact']
+  },
+  risks:      {
+    milestoneUid: ['milestone id'], title: ['risk title', 'title'],
+    owner: ['risk owner', 'owner'], rag: ['rag']
+  }
+};
+
+function norm(v) { return v == null ? '' : String(v).trim().toLowerCase(); }
+function str(v)  { return v == null ? '' : String(v).trim(); }
+
+function rowIsBlank(row) {
+  if (!row) return true;
+  for (var i = 0; i < row.length; i++) {
+    if (row[i] != null && String(row[i]).trim() !== '') return false;
+  }
+  return true;
+}
+
+/*
+ * Locate a table inside an array-of-arrays by matching its header row, then
+ * read data rows downward until the first fully-blank row.
+ *
+ *   aoa            : array of rows (each an array of cell values)
+ *   aliasMap       : { field: [alias, ...] } describing the columns to capture
+ *   requiredFields : fields that MUST be present for a row to count as header
+ *   opts.startRow  : row index to start scanning from (default 0)
+ *   opts.rejectHeaders : header strings that must NOT appear in the header row
+ *                        (used to tell the LOEs table apart from the Themes one)
+ *
+ * Returns { headerRowIndex, records: [{field: value}], nextRow }.
+ */
+function extractTable(aoa, aliasMap, requiredFields, opts) {
+  opts = opts || {};
+  var startRow = opts.startRow || 0;
+  var reject = (opts.rejectHeaders || []).map(norm);
+  var fields = Object.keys(aliasMap);
+
+  for (var r = startRow; r < aoa.length; r++) {
+    var headerCells = (aoa[r] || []).map(norm);
+    if (!headerCells.length) continue;
+
+    var colByField = {};
+    for (var f = 0; f < fields.length; f++) {
+      var field = fields[f];
+      var aliases = aliasMap[field];
+      for (var c = 0; c < headerCells.length; c++) {
+        if (headerCells[c] && aliases.indexOf(headerCells[c]) !== -1) { colByField[field] = c; break; }
+      }
+    }
+
+    var hasRequired = requiredFields.every(function (rf) { return rf in colByField; });
+    var hasRejected = reject.some(function (rj) { return headerCells.indexOf(rj) !== -1; });
+    if (!hasRequired || hasRejected) continue;
+
+    // Header found -> read data rows.
+    var records = [];
+    var rr = r + 1;
+    for (; rr < aoa.length; rr++) {
+      if (rowIsBlank(aoa[rr])) break;
+      var drow = aoa[rr];
+      var rec = {};
+      for (var key in colByField) { rec[key] = drow[colByField[key]]; }
+      records.push(rec);
+    }
+    return { headerRowIndex: r, records: records, nextRow: rr + 1 };
+  }
+  return { headerRowIndex: -1, records: [], nextRow: aoa.length };
+}
+
+/*
+ * Convert an Excel cell value to a JS Date at local midnight, or null.
+ * Handles Date objects, Excel serial numbers, and common string formats.
+ */
+function parseExcelDate(raw) {
+  if (raw == null || raw === '') return null;
+
+  if (raw instanceof Date && !isNaN(raw)) {
+    return new Date(raw.getFullYear(), raw.getMonth(), raw.getDate());
+  }
+
+  if (typeof raw === 'number' && isFinite(raw)) {
+    // Excel serial: day 1 == 1900-01-01, accounting for the 1900 leap bug via the 1899-12-30 epoch.
+    var ms = Math.round((raw - 25569) * 86400 * 1000); // 25569 = days from 1899-12-30 to 1970-01-01
+    var u = new Date(ms);
+    return new Date(u.getUTCFullYear(), u.getUTCMonth(), u.getUTCDate());
+  }
+
+  var s = String(raw).trim();
+  var m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(s); // dd/mm/yyyy (day first)
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);                  // yyyy-mm-dd (ISO)
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  var d = new Date(s);
+  return isNaN(d) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/* Resolve a basic colour name to a hex from the brand palette, else literal. */
+function resolveColour(name) {
+  if (!name) return NEUTRAL_COLOUR;
+  var key = String(name).trim().toLowerCase();
+  return BRAND_COLOURS[key] || key; // literal CSS colour fallback (e.g. grey)
+}
+
+/*
+ * Parse the Lookups sheet. The lookup table is anchored at cell F1
+ * (column index 5). Each column from F rightward is one list:
+ *   row 0 = Table/Sheet name, row 1 = Column name,
+ *   row 2 = ';'-separated colour names (optional),
+ *   row 3.. = allowed values until the first blank cell.
+ * Returns { "Table|Column": { values: [...], colourByValue: { value: hex } } }.
+ */
+function parseLookups(aoa) {
+  var out = {};
+  if (!aoa || !aoa.length) return out;
+
+  var maxCol = 0;
+  for (var i = 0; i < aoa.length; i++) { if (aoa[i]) maxCol = Math.max(maxCol, aoa[i].length); }
+
+  for (var c = 5; c < maxCol; c++) {
+    var table = str(cell(aoa, 0, c));
+    var column = str(cell(aoa, 1, c));
+    if (!table || !column) continue;
+
+    var spec = str(cell(aoa, 2, c));
+    var colourNames = spec ? spec.split(';').map(function (x) { return x.trim(); }).filter(Boolean) : [];
+
+    var values = [];
+    for (var r = 3; r < aoa.length; r++) {
+      var v = cell(aoa, r, c);
+      if (v == null || String(v).trim() === '') break;
+      values.push(String(v).trim());
+    }
+
+    var colourByValue = {};
+    values.forEach(function (val, idx) {
+      var name = colourNames.length
+        ? colourNames[idx % colourNames.length]
+        : DEFAULT_PALETTE[idx % DEFAULT_PALETTE.length];
+      colourByValue[val] = colourNames.length ? resolveColour(name) : name;
+    });
+
+    out[table + '|' + column] = { values: values, colourByValue: colourByValue };
+  }
+  return out;
+}
+
+function cell(aoa, r, c) {
+  var row = aoa[r];
+  if (!row) return null;
+  var v = row[c];
+  return v == null ? null : v;
+}
+
+/* Colour for a list-select value, case-insensitive, with a fallback. */
+function colourFor(lookups, table, column, value, fallback) {
+  var entry = lookups[table + '|' + column];
+  if (entry && value != null && String(value).trim() !== '') {
+    var want = String(value).trim().toLowerCase();
+    var keys = Object.keys(entry.colourByValue);
+    for (var i = 0; i < keys.length; i++) {
+      if (keys[i].toLowerCase() === want) return entry.colourByValue[keys[i]];
+    }
+  }
+  return fallback || NEUTRAL_COLOUR;
+}
+
+/*
+ * Build the Activity hierarchy from dash-delimited Activity IDs.
+ * Mutates each activity to add depth, parentUid, childUids[]. Returns warnings.
+ */
+function buildHierarchy(activities) {
+  var warnings = [];
+  var byUid = {};
+  var byThemeActId = {}; // themeId -> { actId -> uid }
+  var globalByActId = {};
+
+  activities.forEach(function (a) {
+    a.depth = a.actId ? String(a.actId).split('-').length : 1;
+    a.childUids = [];
+    a.parentUid = null;
+    byUid[a.uid] = a;
+    (byThemeActId[a.themeId] || (byThemeActId[a.themeId] = {}))[String(a.actId)] = a.uid;
+    if (!(String(a.actId) in globalByActId)) globalByActId[String(a.actId)] = a.uid;
+  });
+
+  activities.forEach(function (a) {
+    if (a.depth <= 1) return;
+    var parentActId = String(a.actId).split('-').slice(0, -1).join('-');
+    var puid = (byThemeActId[a.themeId] && byThemeActId[a.themeId][parentActId]) || globalByActId[parentActId];
+    if (puid && puid !== a.uid) {
+      a.parentUid = puid;
+      byUid[puid].childUids.push(a.uid);
+    } else {
+      warnings.push({ sheet: 'Activities', id: a.uid, reason: 'no parent "' + parentActId + '" found; shown at top level' });
+      a.depth = 1;
+    }
+  });
+
+  return warnings;
+}
+
+/*
+ * Assemble the full in-memory model from per-sheet AOA inputs.
+ *   sheets = { loesThemes, activities, milestones, benefits, risks, lookups }
+ * Returns the data model with indexes, warnings, and the data date extent.
+ */
+function assembleModel(sheets) {
+  var warnings = [];
+  function warn(sheet, id, reason) { warnings.push({ sheet: sheet, id: id, reason: reason }); }
+
+  // --- LOEs & Themes (two tables stacked in one AOA) ---
+  var ltAoa = sheets.loesThemes || [];
+  var loeTbl = extractTable(ltAoa, ALIASES.loes, ['id', 'title'], { rejectHeaders: ['theme id'] });
+  var themeTbl = extractTable(ltAoa, ALIASES.themes, ['id', 'title'], { startRow: loeTbl.nextRow });
+  // If Themes weren't found after the LOEs table, scan the whole sheet for them.
+  if (themeTbl.headerRowIndex === -1) themeTbl = extractTable(ltAoa, ALIASES.themes, ['id', 'title']);
+
+  var loes = loeTbl.records
+    .map(function (r) { return { id: str(r.id), title: str(r.title) || str(r.id) }; })
+    .filter(function (l) { return l.id; });
+
+  var themes = themeTbl.records
+    .map(function (r) {
+      return { id: str(r.id), loeId: str(r.loeId), title: str(r.title) || str(r.id), description: str(r.description) };
+    })
+    .filter(function (t) { return t.id; });
+
+  // --- Activities ---
+  var actTbl = extractTable(sheets.activities || [], ALIASES.activities, ['uid'], {});
+  var activities = actTbl.records
+    .map(function (r) {
+      return {
+        uid: str(r.uid),
+        actId: str(r.actId),
+        themeId: str(r.themeId),
+        title: str(r.title) || str(r.uid),
+        description: str(r.description),
+        start: parseExcelDate(r.start),
+        end: parseExcelDate(r.end),
+        resourcing: str(r.resourcing)
+      };
+    })
+    .filter(function (a) { return a.uid; });
+
+  warnings = warnings.concat(buildHierarchy(activities));
+
+  // --- Milestones ---
+  var mstTbl = extractTable(sheets.milestones || [], ALIASES.milestones, ['uid'], {});
+  var milestones = mstTbl.records
+    .map(function (r) {
+      return {
+        uid: str(r.uid),
+        activityUid: str(r.activityUid),
+        title: str(r.title) || str(r.uid),
+        description: str(r.description),
+        date: parseExcelDate(r.date),
+        owner: str(r.owner),
+        confidence: str(r.confidence)
+      };
+    })
+    .filter(function (m) { return m.uid; });
+
+  // --- Benefits & Risks ---
+  var benTbl = extractTable(sheets.benefits || [], ALIASES.benefits, ['milestoneUid'], {});
+  var benefits = benTbl.records
+    .map(function (r) {
+      return {
+        milestoneUid: str(r.milestoneUid),
+        title: str(r.title),
+        category: str(r.category),
+        beneficiary: str(r.beneficiary),
+        impact: str(r.impact)
+      };
+    })
+    .filter(function (b) { return b.milestoneUid; });
+
+  var riskTbl = extractTable(sheets.risks || [], ALIASES.risks, ['milestoneUid'], {});
+  var risks = riskTbl.records
+    .map(function (r) {
+      return {
+        milestoneUid: str(r.milestoneUid),
+        title: str(r.title),
+        owner: str(r.owner),
+        rag: str(r.rag)
+      };
+    })
+    .filter(function (r) { return r.milestoneUid; });
+
+  // --- Lookups ---
+  var lookups = parseLookups(sheets.lookups || []);
+
+  // --- Indexes & groupings ---
+  var loeById = index(loes);
+  var themeById = index(themes);
+  var activityByUid = index(activities, 'uid');
+  var milestoneByUid = index(milestones, 'uid');
+
+  var themesByLoe = groupBy(themes, 'loeId');
+  var activitiesByTheme = groupBy(activities, 'themeId');
+  var milestonesByActivity = groupBy(milestones, 'activityUid');
+  var benefitsByMilestone = groupBy(benefits, 'milestoneUid');
+  var risksByMilestone = groupBy(risks, 'milestoneUid');
+
+  // --- Referential warnings ---
+  themes.forEach(function (t) { if (t.loeId && !loeById[t.loeId]) warn('Themes', t.id, 'unknown LOE "' + t.loeId + '"'); });
+  activities.forEach(function (a) { if (a.themeId && !themeById[a.themeId]) warn('Activities', a.uid, 'unknown Theme "' + a.themeId + '"'); });
+  milestones.forEach(function (m) { if (m.activityUid && !activityByUid[m.activityUid]) warn('Milestones', m.uid, 'unknown Activity "' + m.activityUid + '"'); });
+  benefits.forEach(function (b) { if (!milestoneByUid[b.milestoneUid]) warn('Benefits', b.milestoneUid, 'unknown Milestone'); });
+  risks.forEach(function (r) { if (!milestoneByUid[r.milestoneUid]) warn('Risks', r.milestoneUid, 'unknown Milestone'); });
+
+  // --- Date extent ---
+  var min = null, max = null;
+  function span(d) { if (!d) return; if (!min || d < min) min = d; if (!max || d > max) max = d; }
+  activities.forEach(function (a) { span(a.start); span(a.end); });
+  milestones.forEach(function (m) { span(m.date); });
+
+  return {
+    loes: loes, themes: themes, activities: activities, milestones: milestones,
+    benefits: benefits, risks: risks, lookups: lookups,
+    loeById: loeById, themeById: themeById, activityByUid: activityByUid, milestoneByUid: milestoneByUid,
+    themesByLoe: themesByLoe, activitiesByTheme: activitiesByTheme,
+    milestonesByActivity: milestonesByActivity,
+    benefitsByMilestone: benefitsByMilestone, risksByMilestone: risksByMilestone,
+    warnings: warnings,
+    dataDateMin: min, dataDateMax: max
+  };
+}
+
+function index(arr, key) {
+  key = key || 'id';
+  var out = {};
+  arr.forEach(function (o) { if (!(o[key] in out)) out[o[key]] = o; });
+  return out;
+}
+function groupBy(arr, key) {
+  var out = {};
+  arr.forEach(function (o) { (out[o[key]] || (out[o[key]] = [])).push(o); });
+  return out;
+}
+
+/* ===================================================================== *
+ *  PURE-DATA-LAYER END
+ * ===================================================================== */
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    extractTable: extractTable, parseExcelDate: parseExcelDate, resolveColour: resolveColour,
+    parseLookups: parseLookups, colourFor: colourFor, buildHierarchy: buildHierarchy,
+    assembleModel: assembleModel, ALIASES: ALIASES, BRAND_COLOURS: BRAND_COLOURS
+  };
+}
+</script>
+
+<script>
+/* ===================================================================== *
+ *  BROWSER LAYER: workbook loading, state, layout, SVG rendering, UI.
+ * ===================================================================== */
+(function () {
+  if (typeof document === 'undefined') return; // skip under Node test harness
+
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var XHTML_NS = 'http://www.w3.org/1999/xhtml';
+
+  /* Layout constants (base sizes at scale = 1). */
+  var LAYOUT = {
+    loeGutter: 40,        // width of the rotated LOE-title column
+    labelWidth: 320,      // Activity-label column (~50 characters)
+    marginRight: 48,
+    minMonthWidth: 70,    // below this we let the chart scroll horizontally
+    axisHeight: 54,
+    bodyPadTop: 8,
+    bodyPadBottom: 40,
+    themeHeaderHeight: 30,
+    rowHeight: 46,        // depth-1 row; reduced a little for deeper rows
+    barHeight: 22,
+    markerSize: 8,
+    labelFont: 13,
+    mstLabelZone: 26,     // extra height per activity row when milestone labels shown
+    minScale: 0.55,       // below this we stop shrinking and let the body scroll
+    maxScale: 1.6         // cap on upscaling when there is spare vertical space
+  };
+
+  var state = {
+    model: null,
+    dateStart: null,
+    dateEnd: null,
+    loeFilter: new Set(),     // empty == all
+    themeFilter: new Set(),   // empty == all
+    onlyBenefit: false,
+    onlyRisk: false,
+    showMstLabels: false,
+    expanded: new Set()       // activity uids expanded to reveal children
+  };
+
+  /* ---------------- Workbook loading ---------------- */
+
+  function sheetToAoa(ws) {
+    if (!ws) return [];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true, blankrows: true });
+  }
+
+  function findSheet(wb, names) {
+    var map = {};
+    wb.SheetNames.forEach(function (n) { map[n.trim().toLowerCase()] = wb.Sheets[n]; });
+    for (var i = 0; i < names.length; i++) {
+      var ws = map[names[i].toLowerCase()];
+      if (ws) return ws;
+    }
+    return null;
+  }
+
+  function buildSheetsFromWorkbook(wb) {
+    var combined = findSheet(wb, ['loes & themes', 'loes and themes', 'loes&themes']);
+    var loesThemes;
+    if (combined) {
+      loesThemes = sheetToAoa(combined);
+    } else {
+      // Separate LOEs and Themes sheets: stack them with a blank separator.
+      var loesAoa = sheetToAoa(findSheet(wb, ['loes', 'loe']));
+      var themesAoa = sheetToAoa(findSheet(wb, ['themes', 'theme']));
+      loesThemes = loesAoa.concat([[]], themesAoa);
+    }
+
+    return {
+      loesThemes: loesThemes,
+      activities: sheetToAoa(findSheet(wb, ['activities', 'activity'])),
+      milestones: sheetToAoa(findSheet(wb, ['milestones', 'milestone'])),
+      benefits: sheetToAoa(findSheet(wb, ['benefits', 'benefit'])),
+      risks: sheetToAoa(findSheet(wb, ['risks', 'risk'])),
+      lookups: sheetToAoa(findSheet(wb, ['lookups', 'lookup']))
+    };
+  }
+
+  function loadWorkbook(buffer) {
+    var wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+    var sheets = buildSheetsFromWorkbook(wb);
+    var model = assembleModel(sheets);
+    state.model = model;
+
+    // Default date window: current month -> +12 months, clamped to data extent.
+    var now = new Date();
+    var defStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    var defEnd = new Date(now.getFullYear(), now.getMonth() + 12, 1);
+    state.dateStart = clampMonth(defStart);
+    state.dateEnd = clampMonth(defEnd);
+    state.loeFilter = new Set();
+    state.themeFilter = new Set();
+    state.expanded = new Set();
+
+    document.getElementById('loader').hidden = true;
+    document.getElementById('config-bar').hidden = false;
+    document.getElementById('chart-wrap').hidden = false;
+    document.body.style.overflowX = 'auto';
+
+    initDateInputs();
+    buildLoeDropdown();
+    buildThemeDropdown();
+    updateWarnBadge();
+    syncConfigBarHeight();
+    render();
+  }
+
+  function clampMonth(d) {
+    var m = state.model;
+    if (!m) return d;
+    var lo = m.dataDateMin ? firstOfMonth(m.dataDateMin) : d;
+    var hi = m.dataDateMax ? firstOfMonth(m.dataDateMax) : d;
+    if (d < lo) return new Date(lo);
+    if (d > hi) return new Date(hi);
+    return d;
+  }
+  function firstOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+  function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1); }
+  function monthsBetween(a, b) { return (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth()); }
+  function daysInMonth(y, m) { return new Date(y, m + 1, 0).getDate(); }
+
+  /* ---------------- Config bar controls ---------------- */
+
+  function initDateInputs() {
+    var m = state.model;
+    var start = document.getElementById('date-start');
+    var end = document.getElementById('date-end');
+    if (m.dataDateMin) { start.min = monthInputValue(firstOfMonth(m.dataDateMin)); end.min = start.min; }
+    if (m.dataDateMax) { start.max = monthInputValue(firstOfMonth(m.dataDateMax)); end.max = start.max; }
+    start.value = monthInputValue(state.dateStart);
+    end.value = monthInputValue(state.dateEnd);
+  }
+  function monthInputValue(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+  function parseMonthInput(v) {
+    var m = /^(\d{4})-(\d{1,2})$/.exec(v || '');
+    return m ? new Date(+m[1], +m[2] - 1, 1) : null;
+  }
+
+  function buildLoeDropdown() {
+    var panel = document.getElementById('loe-panel');
+    panel.innerHTML = '';
+    state.model.loes.forEach(function (loe) {
+      var label = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = state.loeFilter.size === 0 || state.loeFilter.has(loe.id);
+      cb.addEventListener('change', function () {
+        rebuildSetFromChecks(panel, 'loe', state.loeFilter, state.model.loes.length);
+        buildThemeDropdown();
+        updateFilterButtons();
+        render();
+      });
+      cb.dataset.loe = loe.id;
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(loe.title));
+      panel.appendChild(label);
+    });
+    updateFilterButtons();
+  }
+
+  function buildThemeDropdown() {
+    var panel = document.getElementById('theme-panel');
+    panel.innerHTML = '';
+    var m = state.model;
+    var activeLoes = m.loes.filter(function (l) { return state.loeFilter.size === 0 || state.loeFilter.has(l.id); });
+    activeLoes.forEach(function (loe) {
+      var sec = document.createElement('div');
+      sec.className = 'dropdown-section';
+      sec.textContent = loe.title;
+      panel.appendChild(sec);
+      (m.themesByLoe[loe.id] || []).forEach(function (theme) {
+        var label = document.createElement('label');
+        label.className = 'indent';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = state.themeFilter.size === 0 || state.themeFilter.has(theme.id);
+        cb.dataset.theme = theme.id;
+        cb.addEventListener('change', function () {
+          rebuildSetFromChecks(panel, 'theme', state.themeFilter, totalThemes());
+          updateFilterButtons();
+          render();
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(theme.title));
+        panel.appendChild(label);
+      });
+    });
+    updateFilterButtons();
+  }
+  function totalThemes() { return state.model.themes.length; }
+
+  /* Rebuild a filter Set from checkbox state; an all-checked set is stored as empty (== all). */
+  function rebuildSetFromChecks(panel, attr, targetSet, total) {
+    var boxes = panel.querySelectorAll('input[data-' + attr + ']');
+    targetSet.clear();
+    var checkedCount = 0;
+    boxes.forEach(function (b) { if (b.checked) { targetSet.add(b.dataset[attr]); checkedCount++; } });
+    if (checkedCount === boxes.length) targetSet.clear(); // all selected -> "all"
+  }
+
+  function updateFilterButtons() {
+    var loeBtn = document.getElementById('loe-btn');
+    var themeBtn = document.getElementById('theme-btn');
+    loeBtn.innerHTML = 'LOEs: ' + (state.loeFilter.size === 0 ? 'all' : state.loeFilter.size) + ' ▾';
+    themeBtn.innerHTML = 'Themes: ' + (state.themeFilter.size === 0 ? 'all' : state.themeFilter.size) + ' ▾';
+  }
+
+  function updateWarnBadge() {
+    var badge = document.getElementById('warn-badge');
+    var w = state.model.warnings;
+    if (!w.length) { badge.hidden = true; return; }
+    badge.hidden = false;
+    badge.textContent = '⚠ ' + w.length + ' data warning' + (w.length === 1 ? '' : 's');
+    badge.title = w.slice(0, 25).map(function (x) { return x.sheet + ' ' + x.id + ': ' + x.reason; }).join('\n');
+  }
+
+  function syncConfigBarHeight() {
+    var h = document.getElementById('config-bar').offsetHeight;
+    document.documentElement.style.setProperty('--bar-h', h + 'px');
+  }
+
+  /* ---------------- Filtering & visibility ---------------- */
+
+  function themeLoeId(themeId) {
+    var t = state.model.themeById[themeId];
+    return t ? t.loeId : null;
+  }
+
+  function activityInDateWindow(a) {
+    if (!state.dateStart || !state.dateEnd) return true;
+    var winStart = state.dateStart;
+    var winEnd = addMonths(state.dateEnd, 1); // inclusive of the end month
+    if (a.start && a.end) return !(a.end < winStart || a.start >= winEnd);
+    if (a.start) return a.start < winEnd;
+    // No dates: keep only if it has a milestone inside the window.
+    var msts = state.model.milestonesByActivity[a.uid] || [];
+    return msts.some(function (mm) { return mm.date && mm.date >= winStart && mm.date < winEnd; }) || msts.length === 0;
+  }
+
+  /* Whether an activity (or any descendant) has a milestone with a benefit/risk. */
+  var _bnMemo, _rkMemo;
+  function activityHasBenefit(a) { return descendantHas(a, 'benefit'); }
+  function activityHasRisk(a) { return descendantHas(a, 'risk'); }
+  function descendantHas(a, kind) {
+    var memo = kind === 'benefit' ? _bnMemo : _rkMemo;
+    if (a.uid in memo) return memo[a.uid];
+    var group = kind === 'benefit' ? state.model.benefitsByMilestone : state.model.risksByMilestone;
+    var own = (state.model.milestonesByActivity[a.uid] || []).some(function (mm) {
+      return (group[mm.uid] || []).length > 0;
+    });
+    var viaChild = a.childUids.some(function (cid) { return descendantHas(state.model.activityByUid[cid], kind); });
+    return (memo[a.uid] = own || viaChild);
+  }
+
+  function activityPassesFilters(a) {
+    var loeId = themeLoeId(a.themeId);
+    if (state.loeFilter.size && (!loeId || !state.loeFilter.has(loeId))) return false;
+    if (state.themeFilter.size && !state.themeFilter.has(a.themeId)) return false;
+    if (!activityInDateWindow(a)) return false;
+    if (state.onlyBenefit && !activityHasBenefit(a)) return false;
+    if (state.onlyRisk && !activityHasRisk(a)) return false;
+    return true;
+  }
+
+  /*
+   * Produce the ordered list of visible activities, grouped LOE -> Theme,
+   * starting from depth-1 activities and including children of expanded rows.
+   */
+  function visibleActivities() {
+    _bnMemo = {}; _rkMemo = {};
+    var m = state.model;
+    var out = [];
+
+    function pushWithChildren(a) {
+      if (!activityPassesFilters(a)) return;
+      out.push(a);
+      if (!state.expanded.has(a.uid)) return;
+      a.childUids.forEach(function (cid) { pushWithChildren(m.activityByUid[cid]); });
+    }
+
+    m.loes.forEach(function (loe) {
+      (m.themesByLoe[loe.id] || []).forEach(function (theme) {
+        (m.activitiesByTheme[theme.id] || []).forEach(function (a) {
+          if (a.depth === 1) pushWithChildren(a);
+        });
+      });
+    });
+    // Activities under themes/LOEs that aren't in the index still render (orphans).
+    m.activities.forEach(function (a) {
+      if (a.depth === 1 && (!m.themeById[a.themeId] || !m.loeById[themeLoeId(a.themeId)])) pushWithChildren(a);
+    });
+    return out;
+  }
+
+  /* ---------------- Geometry helpers ---------------- */
+
+  function diamondPoints(cx, cy, h) {
+    return cx + ',' + (cy - h) + ' ' + (cx + h) + ',' + cy + ' ' + cx + ',' + (cy + h) + ' ' + (cx - h) + ',' + cy;
+  }
+  function starPoints(cx, cy, outer, inner) {
+    var pts = [], start = -Math.PI / 2;
+    for (var i = 0; i < 10; i++) {
+      var r = (i % 2 === 0) ? outer : inner;
+      var a = start + i * Math.PI / 5;
+      pts.push((cx + r * Math.cos(a)).toFixed(2) + ',' + (cy + r * Math.sin(a)).toFixed(2));
+    }
+    return pts.join(' ');
+  }
+  function trianglePoints(cx, cy, h) {
+    return cx + ',' + (cy - h) + ' ' + (cx + h) + ',' + (cy + h) + ' ' + (cx - h) + ',' + (cy + h);
+  }
+
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function depthRowHeight(depth, scale) {
+    var base = depth === 1 ? LAYOUT.rowHeight : Math.max(30, LAYOUT.rowHeight - (depth - 1) * 6);
+    return base * scale + (state.showMstLabels ? LAYOUT.mstLabelZone * scale : 0);
+  }
+  function depthBarHeight(depth, scale) {
+    var base = depth === 1 ? LAYOUT.barHeight : Math.max(10, LAYOUT.barHeight - (depth - 1) * 4);
+    return base * scale;
+  }
+
+  /* ---------------- Rendering ---------------- */
+
+  function render() {
+    var m = state.model;
+    if (!m) return;
+    var axisSvg = document.getElementById('axis-chart');
+    var bodySvg = document.getElementById('body-chart');
+    axisSvg.innerHTML = '';
+    bodySvg.innerHTML = '';
+
+    var visible = visibleActivities();
+
+    // --- Horizontal timeline ---
+    var minDate = firstOfMonth(state.dateStart);
+    var maxDate = addMonths(firstOfMonth(state.dateEnd), 1); // exclusive boundary
+    var totalMonths = Math.max(1, monthsBetween(minDate, maxDate));
+
+    var marginLeft = LAYOUT.loeGutter + LAYOUT.labelWidth;
+    var available = window.innerWidth - marginLeft - LAYOUT.marginRight - 24;
+    var monthWidth = Math.max(LAYOUT.minMonthWidth, available / totalMonths);
+    var plotWidth = monthWidth * totalMonths;
+    var chartWidth = marginLeft + plotWidth + LAYOUT.marginRight;
+
+    function xForMonthStart(d) { return marginLeft + monthsBetween(minDate, d) * monthWidth; }
+    function xForDate(d) {
+      var ms = firstOfMonth(d);
+      var frac = (d.getDate() - 1) / daysInMonth(d.getFullYear(), d.getMonth());
+      return marginLeft + (monthsBetween(minDate, ms) + frac) * monthWidth;
+    }
+    function clampX(d) {
+      if (d < minDate) return minDate;
+      if (d >= maxDate) return new Date(maxDate.getFullYear(), maxDate.getMonth(), 0);
+      return d;
+    }
+
+    // --- Build the vertical sequence (theme headers + activity rows) ---
+    var seq = [];
+    var lastLoe = null, lastTheme = null;
+    visible.forEach(function (a) {
+      var loeId = themeLoeId(a.themeId);
+      if (loeId !== lastLoe) { lastLoe = loeId; lastTheme = null; }
+      if (a.themeId !== lastTheme) { seq.push({ type: 'theme', themeId: a.themeId, loeId: loeId }); lastTheme = a.themeId; }
+      seq.push({ type: 'activity', activity: a });
+    });
+
+    // --- Auto-fit vertical scale ---
+    function naturalHeight(scale) {
+      var h = LAYOUT.bodyPadTop;
+      seq.forEach(function (s) {
+        h += s.type === 'theme' ? LAYOUT.themeHeaderHeight * scale : depthRowHeight(s.activity.depth, scale);
+      });
+      return h + LAYOUT.bodyPadBottom;
+    }
+    var natural = naturalHeight(1);
+    var availH = window.innerHeight - cssVarPx('--bar-h') - LAYOUT.axisHeight - 16;
+    var scale = 1;
+    if (availH > 0) {
+      scale = natural > availH
+        ? Math.max(LAYOUT.minScale, availH / natural)   // shrink to fit (then scroll)
+        : Math.min(LAYOUT.maxScale, availH / natural);  // grow to fill spare space
+    }
+
+    var bodyHeight = naturalHeight(scale);
+
+    // --- Lay out rows, capturing y positions and LOE band extents ---
+    var rowY = {}, rowH = {};
+    var bands = [];        // { loeId, y0, y1 }
+    var themeAt = {};      // y of each theme header (for grid alignment unused but handy)
+    var y = LAYOUT.bodyPadTop;
+    var curBand = null;
+    seq.forEach(function (s) {
+      if (s.type === 'theme') {
+        var loeId = s.loeId;
+        if (!curBand || curBand.loeId !== loeId) {
+          if (curBand) { curBand.y1 = y; bands.push(curBand); }
+          curBand = { loeId: loeId, y0: y, y1: y };
+        }
+        themeAt[s.themeId] = y;
+        s._y = y;
+        y += LAYOUT.themeHeaderHeight * scale;
+      } else {
+        var a = s.activity;
+        rowY[a.uid] = y;
+        rowH[a.uid] = depthRowHeight(a.depth, scale);
+        s._y = y;
+        y += rowH[a.uid];
+      }
+    });
+    if (curBand) { curBand.y1 = y; bands.push(curBand); }
+
+    // --- Size the SVGs ---
+    axisSvg.setAttribute('width', chartWidth);
+    axisSvg.setAttribute('height', LAYOUT.axisHeight);
+    axisSvg.setAttribute('viewBox', '0 0 ' + chartWidth + ' ' + LAYOUT.axisHeight);
+    bodySvg.setAttribute('width', chartWidth);
+    bodySvg.setAttribute('height', bodyHeight);
+    bodySvg.setAttribute('viewBox', '0 0 ' + chartWidth + ' ' + bodyHeight);
+
+    // --- Axis: month + year labels, ticks ---
+    renderAxis(axisSvg, minDate, totalMonths, monthWidth, marginLeft, xForMonthStart, chartWidth);
+
+    // --- Body: bands, grid, theme headers, rows, markers ---
+    var gGrid = svgEl('g', {});
+    var gBands = svgEl('g', {});
+    var gRows = svgEl('g', {});
+    var gConn = svgEl('g', {});
+    bodySvg.appendChild(gBands);
+    bodySvg.appendChild(gGrid);
+    bodySvg.appendChild(gConn);
+    bodySvg.appendChild(gRows);
+
+    // LOE bands + rotated LOE titles
+    bands.forEach(function (band, i) {
+      gBands.appendChild(svgEl('rect', {
+        class: i % 2 ? 'loe-band-b' : 'loe-band-a',
+        x: 0, y: band.y0, width: chartWidth, height: Math.max(0, band.y1 - band.y0)
+      }));
+      gBands.appendChild(svgEl('line', {
+        class: 'loe-divider', x1: 0, y1: band.y0, x2: chartWidth, y2: band.y0
+      }));
+      var loe = state.model.loeById[band.loeId];
+      var title = loe ? loe.title : (band.loeId || 'Unassigned');
+      var cx = LAYOUT.loeGutter / 2;
+      var cy = (band.y0 + band.y1) / 2;
+      var t = svgEl('text', {
+        class: 'loe-text',
+        x: cx, y: cy,
+        'font-size': Math.max(11, 15 * Math.max(scale, 0.8)),
+        'text-anchor': 'middle',
+        transform: 'rotate(-90 ' + cx + ' ' + cy + ')'
+      });
+      t.textContent = title;
+      gBands.appendChild(t);
+    });
+
+    // Vertical month grid lines spanning the body
+    for (var mo = 0; mo <= totalMonths; mo++) {
+      var gx = marginLeft + mo * monthWidth;
+      var d = addMonths(minDate, mo);
+      gGrid.appendChild(svgEl('line', {
+        class: 'grid-line' + (d.getMonth() === 0 ? ' year' : ''),
+        x1: gx, y1: 0, x2: gx, y2: bodyHeight
+      }));
+    }
+    // Today marker
+    var today = new Date();
+    if (today >= minDate && today < maxDate) {
+      var tx = xForDate(today);
+      gGrid.appendChild(svgEl('line', { class: 'axis-today', x1: tx, y1: 0, x2: tx, y2: bodyHeight }));
+    }
+
+    // Theme header blocks
+    seq.forEach(function (s) {
+      if (s.type !== 'theme') return;
+      var theme = state.model.themeById[s.themeId];
+      var hh = LAYOUT.themeHeaderHeight * scale;
+      gRows.appendChild(svgEl('rect', {
+        class: 'theme-block',
+        x: LAYOUT.loeGutter, y: s._y, width: chartWidth - LAYOUT.loeGutter, height: hh
+      }));
+      var label = svgEl('text', {
+        class: 'theme-text',
+        x: LAYOUT.loeGutter + 14, y: s._y + hh / 2 + 5,
+        'font-size': Math.max(11, 13 * Math.max(scale, 0.85))
+      });
+      label.textContent = theme ? theme.title : (s.themeId || 'Unassigned theme');
+      gRows.appendChild(label);
+      if (theme && theme.description) {
+        var desc = svgEl('text', {
+          class: 'theme-desc',
+          x: LAYOUT.loeGutter + 14, y: s._y + hh / 2 + 5,
+          'font-size': Math.max(10, 11 * Math.max(scale, 0.85)),
+          'text-anchor': 'end', // right-aligned in the label column
+          transform: ''
+        });
+        desc.setAttribute('x', marginLeft - 12);
+        desc.textContent = theme.description;
+        gRows.appendChild(desc);
+      }
+    });
+
+    // Activity rows
+    visible.forEach(function (a) {
+      renderActivityRow(gRows, a, rowY[a.uid], rowH[a.uid], scale, xForDate, clampX, marginLeft);
+    });
+
+    // Connectors parent -> child
+    visible.forEach(function (a) {
+      if (!a.parentUid || !(a.parentUid in rowY)) return;
+      var px = LAYOUT.loeGutter + 10 + (a.depth - 2) * 16;
+      var startY = rowY[a.parentUid] + rowH[a.parentUid];
+      var endY = rowY[a.uid] + Math.min(rowH[a.uid] / 2, depthBarHeight(a.depth, scale));
+      var childX = LAYOUT.loeGutter + 10 + (a.depth - 1) * 16;
+      gConn.appendChild(svgEl('path', {
+        class: 'connector',
+        d: 'M ' + px + ' ' + startY + ' L ' + px + ' ' + endY + ' L ' + childX + ' ' + endY
+      }));
+    });
+  }
+
+  function renderAxis(svg, minDate, totalMonths, monthWidth, marginLeft, xForMonthStart, chartWidth) {
+    var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    svg.appendChild(svgEl('line', { class: 'grid-line', x1: 0, y1: LAYOUT.axisHeight - 1, x2: chartWidth, y2: LAYOUT.axisHeight - 1 }));
+    for (var i = 0; i < totalMonths; i++) {
+      var d = addMonths(minDate, i);
+      var x = marginLeft + i * monthWidth;
+      // Year label at January or at the first column.
+      if (d.getMonth() === 0 || i === 0) {
+        var yr = svgEl('text', { class: 'axis-year', x: x + 4, y: 18 });
+        yr.textContent = d.getFullYear();
+        svg.appendChild(yr);
+      }
+      var mo = svgEl('text', { class: 'axis-month', x: x + monthWidth / 2, y: 40 });
+      mo.textContent = monthNames[d.getMonth()];
+      svg.appendChild(mo);
+      svg.appendChild(svgEl('line', { class: 'grid-line' + (d.getMonth() === 0 ? ' year' : ''), x1: x, y1: 24, x2: x, y2: LAYOUT.axisHeight - 1 }));
+    }
+  }
+
+  function renderActivityRow(g, a, top, height, scale, xForDate, clampX, marginLeft) {
+    var m = state.model;
+    var barH = depthBarHeight(a.depth, scale);
+    var labelZone = state.showMstLabels ? LAYOUT.mstLabelZone * scale : 0;
+    var barZoneH = height - labelZone;
+    var barCy = top + barZoneH / 2;
+    var indent = (a.depth - 1) * 16;
+    var fs = Math.max(9, LAYOUT.labelFont * Math.max(scale, 0.7));
+
+    var rowG = svgEl('g', { class: 'row' + (a.childUids.length ? ' expandable' : ''), 'data-act': a.uid });
+    g.appendChild(rowG);
+
+    // Expand triangle
+    if (a.childUids.length) {
+      var tri = svgEl('text', {
+        class: 'expand-icon',
+        x: LAYOUT.loeGutter + 4 + indent, y: barCy + fs / 3, 'font-size': fs
+      });
+      tri.textContent = state.expanded.has(a.uid) ? '▾' : '▸';
+      rowG.appendChild(tri);
+    }
+
+    // Label (HTML in foreignObject so it wraps/clamps nicely)
+    var labelX = LAYOUT.loeGutter + 20 + indent;
+    var labelW = Math.max(20, marginLeft - labelX - 8);
+    var fo = svgEl('foreignObject', { x: labelX, y: top, width: labelW, height: barZoneH });
+    var box = document.createElementNS(XHTML_NS, 'div');
+    box.style.cssText = 'display:flex;align-items:center;height:100%;';
+    var lbl = document.createElementNS(XHTML_NS, 'div');
+    lbl.className = 'row-label';
+    lbl.style.cssText = 'font-size:' + fs + 'px;line-height:1.18;-webkit-line-clamp:' + Math.max(1, Math.floor(barZoneH / (fs * 1.2)));
+    lbl.textContent = a.title;
+    box.appendChild(lbl);
+    fo.appendChild(box);
+    rowG.appendChild(fo);
+
+    // Bar
+    if (a.start && a.end) {
+      var s = clampX(a.start);
+      var e = clampX(new Date(a.end.getFullYear(), a.end.getMonth(), a.end.getDate() + 1));
+      var x0 = xForDate(s), x1 = xForDate(e);
+      var barColour = colourFor(m.lookups, 'Activities', 'Resourcing', a.resourcing, NEUTRAL_BAR);
+      var rect = svgEl('rect', {
+        class: 'bar', x: x0, y: barCy - barH / 2, width: Math.max(4, x1 - x0), height: barH,
+        rx: 4, ry: 4, fill: barColour, 'data-act': a.uid
+      });
+      rowG.appendChild(rect);
+    }
+
+    // Milestones (diamond / star) + risk icons
+    var msts = m.milestonesByActivity[a.uid] || [];
+    var size = Math.max(5, LAYOUT.markerSize * Math.max(scale, 0.7));
+    msts.forEach(function (mst) {
+      if (!mst.date) return;
+      var cx = xForDate(clampX(mst.date));
+      var benefits = m.benefitsByMilestone[mst.uid] || [];
+      var risks = m.risksByMilestone[mst.uid] || [];
+      var colour = colourFor(m.lookups, 'Milestones', 'Delivery Confidence', mst.confidence, '#F4C748');
+
+      var marker;
+      if (benefits.length) {
+        marker = svgEl('polygon', { class: 'marker', points: starPoints(cx, barCy, size * 1.25, size * 0.55), fill: colour });
+      } else {
+        marker = svgEl('polygon', { class: 'marker', points: diamondPoints(cx, barCy, size), fill: colour });
+      }
+      marker.setAttribute('data-mst', mst.uid);
+      rowG.appendChild(marker);
+
+      // Risk warning triangle adjacent to the marker
+      if (risks.length) {
+        var rColour = colourFor(m.lookups, 'Risks', 'RAG', risks[0].rag, '#D41F41');
+        var rx = cx + size + 5, ry = barCy - size * 0.2;
+        var tg = svgEl('g', { class: 'risk-icon', 'data-mst': mst.uid });
+        tg.appendChild(svgEl('polygon', { points: trianglePoints(rx, ry, size * 0.95), fill: rColour, stroke: 'rgba(0,0,0,.4)', 'stroke-width': 1 }));
+        var glyph = svgEl('text', { class: 'risk-glyph', x: rx, y: ry + size * 0.75, 'font-size': size * 1.1 });
+        glyph.textContent = '!';
+        tg.appendChild(glyph);
+        rowG.appendChild(tg);
+      }
+
+      // Optional label under the marker
+      if (state.showMstLabels) {
+        var lw = 90 * scale;
+        var lfo = svgEl('foreignObject', { x: cx - lw / 2, y: top + barZoneH, width: lw, height: labelZone });
+        var ldiv = document.createElementNS(XHTML_NS, 'div');
+        ldiv.className = 'marker-label';
+        ldiv.textContent = mst.title;
+        lfo.appendChild(ldiv);
+        rowG.appendChild(lfo);
+      }
+    });
+  }
+
+  var NEUTRAL_BAR = '#59ACDA';
+
+  function cssVarPx(name) {
+    var v = getComputedStyle(document.documentElement).getPropertyValue(name);
+    return parseFloat(v) || 0;
+  }
+
+  /* ---------------- Tooltip ---------------- */
+
+  function buildTooltip(mstUid) {
+    var m = state.model;
+    var mst = m.milestoneByUid[mstUid];
+    if (!mst) return null;
+    var benefits = m.benefitsByMilestone[mst.uid] || [];
+    var risks = m.risksByMilestone[mst.uid] || [];
+
+    var conf = colourFor(m.lookups, 'Milestones', 'Delivery Confidence', mst.confidence, '#F4C748');
+    var html = '<div class="tt-kind">' + (benefits.length ? 'Milestone &middot; Benefit' : 'Milestone') + '</div>';
+    html += '<h4>' + esc(mst.title) + '</h4>';
+    if (mst.description) html += '<div>' + esc(mst.description) + '</div>';
+    if (mst.date) html += '<div><span class="tt-label">Date:</span> ' + fmtDate(mst.date) + '</div>';
+    if (mst.owner) html += '<div><span class="tt-label">Owner:</span> ' + esc(mst.owner) + '</div>';
+    if (mst.confidence) html += '<div><span class="tt-label">Confidence:</span> <span class="tt-tag" style="background:' + conf + '">' + esc(mst.confidence) + '</span></div>';
+
+    benefits.forEach(function (b) {
+      html += '<div class="tt-sec benefit"><div class="tt-kind">Benefit</div>';
+      if (b.title) html += '<strong>' + esc(b.title) + '</strong>';
+      if (b.category) html += '<div><span class="tt-label">Category:</span> ' + esc(b.category) + '</div>';
+      if (b.beneficiary) html += '<div><span class="tt-label">Beneficiary:</span> ' + esc(b.beneficiary) + '</div>';
+      if (b.impact) html += '<div><span class="tt-label">Impact:</span> ' + esc(b.impact) + '</div>';
+      html += '</div>';
+    });
+    risks.forEach(function (r) {
+      var rc = colourFor(m.lookups, 'Risks', 'RAG', r.rag, '#D41F41');
+      html += '<div class="tt-sec risk"><div class="tt-kind">Risk</div>';
+      if (r.title) html += '<strong>' + esc(r.title) + '</strong>';
+      if (r.owner) html += '<div><span class="tt-label">Owner:</span> ' + esc(r.owner) + '</div>';
+      if (r.rag) html += '<div><span class="tt-label">RAG:</span> <span class="tt-tag" style="background:' + rc + '">' + esc(r.rag) + '</span></div>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  function fmtDate(d) { return d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getFullYear(); }
+
+  /* ---------------- Event wiring ---------------- */
+
+  function wireEvents() {
+    var fileInput = document.getElementById('file-input');
+    document.getElementById('pick-file').addEventListener('click', function () { fileInput.click(); });
+    document.getElementById('reload-file').addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function (e) {
+      var file = e.target.files[0];
+      if (!file) return;
+      var status = document.getElementById('load-status');
+      status.textContent = 'Reading ' + file.name + '…';
+      if (typeof XLSX === 'undefined' || !XLSX.read) { status.textContent = 'Excel library failed to load (check your connection).'; return; }
+      file.arrayBuffer().then(function (buf) {
+        try { loadWorkbook(buf); }
+        catch (err) { status.textContent = 'Could not read workbook: ' + err.message; }
+      });
+      e.target.value = '';
+    });
+
+    // Date inputs
+    document.getElementById('date-start').addEventListener('change', function (e) {
+      var d = parseMonthInput(e.target.value); if (d) { state.dateStart = clampMonth(d); render(); }
+    });
+    document.getElementById('date-end').addEventListener('change', function (e) {
+      var d = parseMonthInput(e.target.value); if (d) { state.dateEnd = clampMonth(d); render(); }
+    });
+    document.getElementById('date-reset').addEventListener('click', function () {
+      var now = new Date();
+      state.dateStart = clampMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+      state.dateEnd = clampMonth(new Date(now.getFullYear(), now.getMonth() + 12, 1));
+      initDateInputs(); render();
+    });
+
+    // Dropdown toggles
+    wireDropdown('loe');
+    wireDropdown('theme');
+
+    // Checkboxes
+    document.getElementById('only-benefit').addEventListener('change', function (e) { state.onlyBenefit = e.target.checked; render(); });
+    document.getElementById('only-risk').addEventListener('change', function (e) { state.onlyRisk = e.target.checked; render(); });
+    document.getElementById('show-mst-labels').addEventListener('change', function (e) { state.showMstLabels = e.target.checked; render(); });
+
+    document.getElementById('warn-badge').addEventListener('click', function () {
+      var w = state.model.warnings;
+      alert(w.map(function (x) { return x.sheet + ' [' + x.id + ']: ' + x.reason; }).join('\n'));
+    });
+
+    // Chart interactions
+    var body = document.getElementById('body-chart');
+    var tooltip = document.getElementById('tooltip');
+    body.addEventListener('mousemove', function (e) {
+      var marker = e.target.closest('[data-mst]');
+      if (!marker) { tooltip.hidden = true; return; }
+      var html = buildTooltip(marker.getAttribute('data-mst'));
+      if (!html) { tooltip.hidden = true; return; }
+      tooltip.innerHTML = html;
+      tooltip.hidden = false;
+      var pad = 14, tw = tooltip.offsetWidth, th = tooltip.offsetHeight;
+      var left = e.clientX + pad, top = e.clientY + pad;
+      if (left + tw + pad > window.innerWidth) left = e.clientX - tw - pad;
+      if (top + th + pad > window.innerHeight) top = e.clientY - th - pad;
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+    });
+    body.addEventListener('mouseleave', function () { tooltip.hidden = true; });
+
+    body.addEventListener('click', function (e) {
+      if (e.target.closest('[data-mst]')) return; // markers don't toggle rows
+      var row = e.target.closest('.row.expandable');
+      if (!row) return;
+      var uid = row.getAttribute('data-act');
+      if (state.expanded.has(uid)) state.expanded.delete(uid); else state.expanded.add(uid);
+      render();
+    });
+
+    // Resize -> re-fit
+    var rt = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(rt);
+      rt = setTimeout(function () { if (state.model) { syncConfigBarHeight(); render(); } }, 150);
+    });
+  }
+
+  function wireDropdown(name) {
+    var btn = document.getElementById(name + '-btn');
+    var panel = document.getElementById(name + '-panel');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      // close the other panel
+      document.querySelectorAll('.dropdown-panel').forEach(function (p) { if (p !== panel) p.hidden = true; });
+      panel.hidden = !panel.hidden;
+    });
+    panel.addEventListener('click', function (e) { e.stopPropagation(); });
+  }
+  document.addEventListener('click', function () {
+    document.querySelectorAll('.dropdown-panel').forEach(function (p) { p.hidden = true; });
+  });
+
+  wireEvents();
+})();
+</script>
+</body>
+</html>
