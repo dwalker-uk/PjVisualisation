@@ -216,7 +216,7 @@
 
   .theme-block { fill: var(--bg-2); }
   .theme-text  { fill: var(--fg); font-weight: 600; letter-spacing: .8px; }
-  .theme-desc  { fill: var(--fg-dim); }
+  .theme-text.has-desc { cursor: help; }
 
   .row-label   { color: var(--fg); overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; }
   .expand-icon { fill: var(--fg-muted); cursor: pointer; user-select: none; }
@@ -229,8 +229,7 @@
   .marker        { stroke: rgba(0,0,0,.35); stroke-width: 1; cursor: pointer; }
   .marker:hover  { stroke: #fff; stroke-width: 1.5; }
   .risk-icon     { cursor: pointer; }
-  .risk-glyph    { fill: #1a0a0a; font-size: 9px; font-weight: 800; text-anchor: middle; }
-  .marker-label  { color: var(--fg-muted); font-size: 10px; text-align: center; line-height: 1.1;
+  .marker-label  { color: var(--fg-muted); text-align: center;
                    overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 
   /* ---- Tooltip ---- */
@@ -583,11 +582,14 @@ function assembleModel(sheets) {
     .map(function (r) { return { id: str(r.id), title: str(r.title) || str(r.id) }; })
     .filter(function (l) { return l.id; });
 
+  // Excel tables often leave a trailing blank row; the auto-generated key
+  // columns (UniqueAct ID etc.) may still carry a formula value on that row,
+  // so we drop rows by testing the *parent* foreign-key column instead.
   var themes = themeTbl.records
     .map(function (r) {
       return { id: str(r.id), loeId: str(r.loeId), title: str(r.title) || str(r.id), description: str(r.description) };
     })
-    .filter(function (t) { return t.id; });
+    .filter(function (t) { return t.loeId; });
 
   // --- Activities ---
   var actTbl = extractTable(sheets.activities || [], ALIASES.activities, ['uid'], {});
@@ -604,7 +606,7 @@ function assembleModel(sheets) {
         resourcing: str(r.resourcing)
       };
     })
-    .filter(function (a) { return a.uid; });
+    .filter(function (a) { return a.themeId; }); // parent column => skips trailing blank rows
 
   warnings = warnings.concat(buildHierarchy(activities));
 
@@ -622,7 +624,7 @@ function assembleModel(sheets) {
         confidence: str(r.confidence)
       };
     })
-    .filter(function (m) { return m.uid; });
+    .filter(function (m) { return m.activityUid; }); // parent column => skips trailing blank rows
 
   // --- Benefits & Risks ---
   var benTbl = extractTable(sheets.benefits || [], ALIASES.benefits, ['milestoneUid'], {});
@@ -734,12 +736,13 @@ if (typeof module !== 'undefined' && module.exports) {
     axisHeight: 54,
     bodyPadTop: 8,
     bodyPadBottom: 40,
-    themeHeaderHeight: 30,
+    themeHeaderHeight: 32,
     rowHeight: 46,        // depth-1 row; reduced a little for deeper rows
     barHeight: 22,
     markerSize: 8,
-    labelFont: 13,
-    mstLabelZone: 26,     // extra height per activity row when milestone labels shown
+    labelFont: 16,        // Activity title size (wraps within the label column)
+    mstLabelZone: 40,     // extra height per activity row when milestone labels shown
+    mstLabelMaxWidth: 150, // most width a milestone label may take before wrapping
     minScale: 0.55,       // below this we stop shrinking and let the body scroll
     maxScale: 1.6         // cap on upscaling when there is spare vertical space
   };
@@ -1025,10 +1028,6 @@ if (typeof module !== 'undefined' && module.exports) {
     }
     return pts.join(' ');
   }
-  function trianglePoints(cx, cy, h) {
-    return cx + ',' + (cy - h) + ' ' + (cx + h) + ',' + (cy + h) + ' ' + (cx - h) + ',' + (cy + h);
-  }
-
   function svgEl(tag, attrs) {
     var e = document.createElementNS(SVG_NS, tag);
     for (var k in attrs) e.setAttribute(k, attrs[k]);
@@ -1171,7 +1170,7 @@ if (typeof module !== 'undefined' && module.exports) {
       var t = svgEl('text', {
         class: 'loe-text',
         x: cx, y: cy,
-        'font-size': Math.max(11, 15 * Math.max(scale, 0.8)),
+        'font-size': Math.max(14, 19 * Math.max(scale, 0.85)),
         'text-anchor': 'middle',
         transform: 'rotate(-90 ' + cx + ' ' + cy + ')'
       });
@@ -1204,25 +1203,16 @@ if (typeof module !== 'undefined' && module.exports) {
         class: 'theme-block',
         x: LAYOUT.loeGutter, y: s._y, width: chartWidth - LAYOUT.loeGutter, height: hh
       }));
+      var hasDesc = !!(theme && theme.description);
       var label = svgEl('text', {
-        class: 'theme-text',
+        class: 'theme-text' + (hasDesc ? ' has-desc' : ''),
         x: LAYOUT.loeGutter + 14, y: s._y + hh / 2 + 5,
-        'font-size': Math.max(11, 13 * Math.max(scale, 0.85))
+        'font-size': Math.max(13, 16 * Math.max(scale, 0.85))
       });
-      label.textContent = theme ? theme.title : (s.themeId || 'Unassigned theme');
+      if (hasDesc) label.setAttribute('data-theme', s.themeId); // description shown on hover
+      // A subtle info glyph hints that a description is available on hover.
+      label.textContent = (theme ? theme.title : (s.themeId || 'Unassigned theme')) + (hasDesc ? '  ⓘ' : '');
       gRows.appendChild(label);
-      if (theme && theme.description) {
-        var desc = svgEl('text', {
-          class: 'theme-desc',
-          x: LAYOUT.loeGutter + 14, y: s._y + hh / 2 + 5,
-          'font-size': Math.max(10, 11 * Math.max(scale, 0.85)),
-          'text-anchor': 'end', // right-aligned in the label column
-          transform: ''
-        });
-        desc.setAttribute('x', marginLeft - 12);
-        desc.textContent = theme.description;
-        gRows.appendChild(desc);
-      }
     });
 
     // Activity rows
@@ -1312,43 +1302,61 @@ if (typeof module !== 'undefined' && module.exports) {
       rowG.appendChild(rect);
     }
 
-    // Milestones (diamond / star) + risk icons
-    var msts = m.milestonesByActivity[a.uid] || [];
+    // Milestones (diamond / star) + risk glyphs. Precompute x positions
+    // (sorted) so each label can claim the space up to its nearest neighbour.
     var size = Math.max(5, LAYOUT.markerSize * Math.max(scale, 0.7));
-    msts.forEach(function (mst) {
-      if (!mst.date) return;
-      var cx = xForDate(clampX(mst.date));
+    var pts = (m.milestonesByActivity[a.uid] || [])
+      .filter(function (mst) { return mst.date; })
+      .map(function (mst) { return { mst: mst, cx: xForDate(clampX(mst.date)) }; })
+      .sort(function (p, q) { return p.cx - q.cx; });
+
+    var mstLabelFs = Math.max(9, 11 * Math.max(scale, 0.8));
+    var rowBottom = top + barZoneH + labelZone;
+
+    pts.forEach(function (p, i) {
+      var mst = p.mst, cx = p.cx;
       var benefits = m.benefitsByMilestone[mst.uid] || [];
       var risks = m.risksByMilestone[mst.uid] || [];
       var colour = colourFor(m.lookups, 'Milestones', 'Delivery Confidence', mst.confidence, '#F4C748');
 
-      var marker;
-      if (benefits.length) {
-        marker = svgEl('polygon', { class: 'marker', points: starPoints(cx, barCy, size * 1.25, size * 0.55), fill: colour });
-      } else {
-        marker = svgEl('polygon', { class: 'marker', points: diamondPoints(cx, barCy, size), fill: colour });
-      }
+      var marker = benefits.length
+        ? svgEl('polygon', { class: 'marker', points: starPoints(cx, barCy, size * 1.25, size * 0.55), fill: colour })
+        : svgEl('polygon', { class: 'marker', points: diamondPoints(cx, barCy, size), fill: colour });
       marker.setAttribute('data-mst', mst.uid);
       rowG.appendChild(marker);
 
-      // Risk warning triangle adjacent to the marker
+      // Risk: a single warning glyph (⚠), slightly smaller than the marker,
+      // placed ~45° down-and-right of it. The text variation selector forces a
+      // monochrome glyph so the RAG fill colour applies.
       if (risks.length) {
         var rColour = colourFor(m.lookups, 'Risks', 'RAG', risks[0].rag, '#D41F41');
-        var rx = cx + size + 5, ry = barCy - size * 0.2;
-        var tg = svgEl('g', { class: 'risk-icon', 'data-mst': mst.uid });
-        tg.appendChild(svgEl('polygon', { points: trianglePoints(rx, ry, size * 0.95), fill: rColour, stroke: 'rgba(0,0,0,.4)', 'stroke-width': 1 }));
-        var glyph = svgEl('text', { class: 'risk-glyph', x: rx, y: ry + size * 0.75, 'font-size': size * 1.1 });
-        glyph.textContent = '!';
-        tg.appendChild(glyph);
-        rowG.appendChild(tg);
+        var off = size * 0.85;
+        var glyph = svgEl('text', {
+          class: 'risk-icon', 'data-mst': mst.uid,
+          x: cx + off, y: barCy + off,
+          'font-size': size * 2.0, 'text-anchor': 'middle', 'dominant-baseline': 'central',
+          fill: rColour, stroke: 'rgba(0,0,0,.55)', 'stroke-width': 0.6, 'paint-order': 'stroke'
+        });
+        glyph.textContent = '⚠︎'; // ⚠ + text variation selector (forces monochrome)
+        rowG.appendChild(glyph);
       }
 
-      // Optional label under the marker
+      // Optional label under the marker. Width is limited by the closest
+      // neighbouring milestone (so adjacent labels don't collide), capped at a
+      // sensible max; the label wraps to two fully-visible lines.
       if (state.showMstLabels) {
-        var lw = 90 * scale;
-        var lfo = svgEl('foreignObject', { x: cx - lw / 2, y: top + barZoneH, width: lw, height: labelZone });
+        var leftGap = i > 0 ? (cx - pts[i - 1].cx) : Infinity;
+        var rightGap = i < pts.length - 1 ? (pts[i + 1].cx - cx) : Infinity;
+        var neighbour = Math.min(leftGap, rightGap);
+        var maxW = LAYOUT.mstLabelMaxWidth * Math.max(scale, 0.85);
+        var lw = Math.max(44 * Math.max(scale, 0.8), Math.min(maxW, isFinite(neighbour) ? neighbour - 6 : maxW));
+
+        var ly = barCy + size + 2;                 // nudged up, just below the marker
+        var lh = Math.max(mstLabelFs * 2.4, rowBottom - ly);
+        var lfo = svgEl('foreignObject', { x: cx - lw / 2, y: ly, width: lw, height: lh });
         var ldiv = document.createElementNS(XHTML_NS, 'div');
         ldiv.className = 'marker-label';
+        ldiv.style.cssText = 'font-size:' + mstLabelFs + 'px;line-height:1.15;';
         ldiv.textContent = mst.title;
         lfo.appendChild(ldiv);
         rowG.appendChild(lfo);
@@ -1397,6 +1405,13 @@ if (typeof module !== 'undefined' && module.exports) {
       html += '</div>';
     });
     return html;
+  }
+
+  function buildThemeTooltip(themeId) {
+    var theme = state.model.themeById[themeId];
+    if (!theme || !theme.description) return null;
+    return '<div class="tt-kind">Theme</div><h4>' + esc(theme.title) + '</h4>'
+         + '<div>' + esc(theme.description) + '</div>';
   }
 
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
@@ -1454,8 +1469,10 @@ if (typeof module !== 'undefined' && module.exports) {
     var tooltip = document.getElementById('tooltip');
     body.addEventListener('mousemove', function (e) {
       var marker = e.target.closest('[data-mst]');
-      if (!marker) { tooltip.hidden = true; return; }
-      var html = buildTooltip(marker.getAttribute('data-mst'));
+      var themeEl = marker ? null : e.target.closest('[data-theme]');
+      if (!marker && !themeEl) { tooltip.hidden = true; return; }
+      var html = marker ? buildTooltip(marker.getAttribute('data-mst'))
+                        : buildThemeTooltip(themeEl.getAttribute('data-theme'));
       if (!html) { tooltip.hidden = true; return; }
       tooltip.innerHTML = html;
       tooltip.hidden = false;

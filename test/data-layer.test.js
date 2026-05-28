@@ -46,6 +46,7 @@ const loesThemes = [
   ['LOE ID', 'Theme ID', 'Title', 'Description'],
   ['L1', 'T1', 'Customer Service', 'Improve service'],
   ['L2', 'T2', 'Platform', null],
+  [null, 'T-GHOST', null, null], // Excel artefact: auto Theme ID but no parent LOE ID
   []
 ];
 
@@ -57,14 +58,16 @@ const activities = [
   ['T1', 'A-1', 'U-A1', 2, 'Child one', '', SERIAL + 10, SERIAL + 80, 'At risk'],
   ['T1', 'A-1-x', 'U-A1x', 3, 'Grandchild', '', SERIAL + 11, SERIAL + 40, 'Funded'],
   ['T2', 'B', 'U-B', 1, 'Platform work', '', new Date(2026, 0, 1), new Date(2026, 5, 1), 'Unfunded'],
-  ['T1', 'C-orphan', 'U-Corph', 2, 'Orphan child', '', SERIAL, SERIAL + 100, 'Funded']
+  ['T1', 'C-orphan', 'U-Corph', 2, 'Orphan child', '', SERIAL, SERIAL + 100, 'Funded'],
+  [null, null, 'U-GHOST', null, null, null, null, null, null] // artefact: auto UniqueAct ID, no parent Theme ID
 ];
 
 const milestones = [
   ['Activity ID', 'UniqueMSt ID', 'Milestone Title', 'Description', 'Date', 'Owner', 'Delivery Confidence'],
   ['U-A', 'M1', 'First milestone', '', SERIAL + 20, 'Alice', 'High'],
   ['U-A1', 'M2', 'Child milestone', '', SERIAL + 30, 'Bob', 'Low'],
-  ['U-B', 'M3', 'Platform milestone', '', new Date(2026, 2, 1), 'Carol', 'Medium']
+  ['U-B', 'M3', 'Platform milestone', '', new Date(2026, 2, 1), 'Carol', 'Medium'],
+  [null, 'M-GHOST', null, null, null, null, null] // artefact: auto UniqueMSt ID, no parent Activity ID
 ];
 
 const benefits = [
@@ -104,6 +107,14 @@ check('reads all activities, keyed by UniqueAct ID', () => {
   assert.strictEqual(model.activities.length, 5);
   assert(model.activityByUid['U-A']);
   assert.strictEqual(model.activityByUid['U-A'].resourcing, 'Funded');
+});
+
+check('drops Excel trailing-artefact rows via the parent-id column', () => {
+  assert.strictEqual(model.themes.length, 2, 'ghost theme dropped');
+  assert(!model.themeById['T-GHOST']);
+  assert(!model.activityByUid['U-GHOST'], 'ghost activity dropped');
+  assert.strictEqual(model.milestones.length, 3, 'ghost milestone dropped');
+  assert(!model.milestoneByUid['M-GHOST']);
 });
 
 check('builds dash-delimited hierarchy', () => {
