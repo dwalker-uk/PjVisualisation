@@ -164,6 +164,11 @@ check('parses Excel serial dates and Date objects', () => {
   assert.strictEqual(uk.getDate(), 15);
 });
 
+check('exposes distinct Risk RAG / Benefit Category values for filters', () => {
+  assert.deepStrictEqual(Array.from(model.riskRagValues), ['Red']);
+  assert.deepStrictEqual(Array.from(model.benefitCategoryValues), ['Efficiency']);
+});
+
 check('computes the data date extent', () => {
   // Dates are created inside the VM realm, so check by duck-typing not instanceof.
   assert(model.dataDateMin && typeof model.dataDateMin.getFullYear === 'function');

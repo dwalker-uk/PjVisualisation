@@ -297,8 +297,22 @@
     <div class="dropdown-panel" id="theme-panel" hidden></div>
   </div>
 
-  <label class="toggle"><input type="checkbox" id="only-benefit"><span>Only with benefit</span></label>
-  <label class="toggle"><input type="checkbox" id="only-risk"><span>Only with risk</span></label>
+  <div class="ctl">
+    <label class="toggle"><input type="checkbox" id="only-benefit"><span>Only with benefit</span></label>
+    <div class="dropdown" id="benefit-dropdown" hidden>
+      <button class="dropdown-btn" id="benefit-btn">Category: any &#9662;</button>
+      <div class="dropdown-panel" id="benefit-panel" hidden></div>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <label class="toggle"><input type="checkbox" id="only-risk"><span>Only with risk</span></label>
+    <div class="dropdown" id="risk-dropdown" hidden>
+      <button class="dropdown-btn" id="risk-btn">RAG: any &#9662;</button>
+      <div class="dropdown-panel" id="risk-panel" hidden></div>
+    </div>
+  </div>
+
   <label class="toggle"><input type="checkbox" id="show-mst-labels"><span>Milestone labels</span></label>
 
   <a class="link" id="reload-file">load another file</a>
@@ -674,6 +688,11 @@ function assembleModel(sheets) {
   benefits.forEach(function (b) { if (!milestoneByUid[b.milestoneUid]) warn('Benefits', b.milestoneUid, 'unknown Milestone'); });
   risks.forEach(function (r) { if (!milestoneByUid[r.milestoneUid]) warn('Risks', r.milestoneUid, 'unknown Milestone'); });
 
+  // --- Distinct Risk RAG / Benefit Category values (for the filter dropdowns),
+  //     ordered by the Lookups list where one is provided. ---
+  var riskRagValues = distinctOrdered(risks.map(function (r) { return r.rag; }), lookups['Risks|RAG']);
+  var benefitCategoryValues = distinctOrdered(benefits.map(function (b) { return b.category; }), lookups['Benefits|Category']);
+
   // --- Date extent ---
   var min = null, max = null;
   function span(d) { if (!d) return; if (!min || d < min) min = d; if (!max || d > max) max = d; }
@@ -687,9 +706,27 @@ function assembleModel(sheets) {
     themesByLoe: themesByLoe, activitiesByTheme: activitiesByTheme,
     milestonesByActivity: milestonesByActivity,
     benefitsByMilestone: benefitsByMilestone, risksByMilestone: risksByMilestone,
+    riskRagValues: riskRagValues, benefitCategoryValues: benefitCategoryValues,
     warnings: warnings,
     dataDateMin: min, dataDateMax: max
   };
+}
+
+/* Distinct, non-empty values, ordered by a Lookups value list when available. */
+function distinctOrdered(values, lookupEntry) {
+  var seen = {}, out = [];
+  values.forEach(function (v) {
+    var s = str(v);
+    if (s && !seen[s.toLowerCase()]) { seen[s.toLowerCase()] = true; out.push(s); }
+  });
+  if (lookupEntry && lookupEntry.values && lookupEntry.values.length) {
+    var order = lookupEntry.values.map(function (x) { return x.toLowerCase(); });
+    out.sort(function (a, b) {
+      var ia = order.indexOf(a.toLowerCase()), ib = order.indexOf(b.toLowerCase());
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+  }
+  return out;
 }
 
 function index(arr, key) {
@@ -754,7 +791,9 @@ if (typeof module !== 'undefined' && module.exports) {
     loeFilter: new Set(),     // empty == all
     themeFilter: new Set(),   // empty == all
     onlyBenefit: false,
+    benefitCategoryFilter: new Set(), // empty == any benefit; otherwise specific categories
     onlyRisk: false,
+    riskRagFilter: new Set(),         // empty == any risk; otherwise specific RAG values
     showMstLabels: false,
     expanded: new Set()       // activity uids expanded to reveal children
   };
@@ -812,7 +851,14 @@ if (typeof module !== 'undefined' && module.exports) {
     state.dateEnd = clampMonth(defEnd);
     state.loeFilter = new Set();
     state.themeFilter = new Set();
+    state.benefitCategoryFilter = new Set();
+    state.riskRagFilter = new Set();
     state.expanded = new Set();
+
+    // Reset the risk/benefit checkboxes and their dropdowns.
+    state.onlyBenefit = false; state.onlyRisk = false;
+    document.getElementById('only-benefit').checked = false;
+    document.getElementById('only-risk').checked = false;
 
     document.getElementById('loader').hidden = true;
     document.getElementById('config-bar').hidden = false;
@@ -822,6 +868,9 @@ if (typeof module !== 'undefined' && module.exports) {
     initDateInputs();
     buildLoeDropdown();
     buildThemeDropdown();
+    buildValueDropdown('benefit', model.benefitCategoryValues, state.benefitCategoryFilter, 'Category');
+    buildValueDropdown('risk', model.riskRagValues, state.riskRagFilter, 'RAG');
+    syncRiskBenefitDropdownVisibility();
     updateWarnBadge();
     syncConfigBarHeight();
     render();
@@ -927,6 +976,49 @@ if (typeof module !== 'undefined' && module.exports) {
     themeBtn.innerHTML = 'Themes: ' + (state.themeFilter.size === 0 ? 'all' : state.themeFilter.size) + ' ▾';
   }
 
+  /*
+   * Specific-value dropdown for the risk/benefit filters. With nothing ticked
+   * the filter means "any" (at least one risk/benefit); ticking values narrows
+   * to activities that have a risk/benefit at one of those specific levels.
+   */
+  function buildValueDropdown(name, values, targetSet, label) {
+    var panel = document.getElementById(name + '-panel');
+    panel.innerHTML = '';
+    values.forEach(function (value) {
+      var lab = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = targetSet.has(value);
+      cb.dataset.value = value;
+      cb.addEventListener('change', function () {
+        rebuildSetFromChecks(panel, 'value', targetSet, values.length);
+        updateValueButton(name, targetSet, label);
+        render();
+      });
+      lab.appendChild(cb);
+      lab.appendChild(document.createTextNode(value));
+      panel.appendChild(lab);
+    });
+    updateValueButton(name, targetSet, label);
+  }
+
+  function updateValueButton(name, targetSet, label) {
+    document.getElementById(name + '-btn').innerHTML =
+      label + ': ' + (targetSet.size === 0 ? 'any' : targetSet.size + ' selected') + ' ▾';
+  }
+
+  /* Show each value dropdown only when its checkbox is on and there are values. */
+  function syncRiskBenefitDropdownVisibility() {
+    var m = state.model;
+    var bd = document.getElementById('benefit-dropdown');
+    var rd = document.getElementById('risk-dropdown');
+    bd.hidden = !(state.onlyBenefit && m.benefitCategoryValues.length);
+    rd.hidden = !(state.onlyRisk && m.riskRagValues.length);
+    if (bd.hidden) document.getElementById('benefit-panel').hidden = true;
+    if (rd.hidden) document.getElementById('risk-panel').hidden = true;
+    syncConfigBarHeight();
+  }
+
   function updateWarnBadge() {
     var badge = document.getElementById('warn-badge');
     var w = state.model.warnings;
@@ -959,16 +1051,31 @@ if (typeof module !== 'undefined' && module.exports) {
     return msts.some(function (mm) { return mm.date && mm.date >= winStart && mm.date < winEnd; }) || msts.length === 0;
   }
 
-  /* Whether an activity (or any descendant) has a milestone with a benefit/risk. */
+  /*
+   * Whether an activity (or any descendant) has a milestone with a matching
+   * benefit/risk. "Matching" means any benefit/risk when the specific-value
+   * filter is empty, or one whose Category/RAG is in the selected set.
+   */
   var _bnMemo, _rkMemo;
   function activityHasBenefit(a) { return descendantHas(a, 'benefit'); }
   function activityHasRisk(a) { return descendantHas(a, 'risk'); }
+
+  function milestoneMatches(mstUid, kind) {
+    if (kind === 'benefit') {
+      var bs = state.model.benefitsByMilestone[mstUid] || [];
+      if (!state.benefitCategoryFilter.size) return bs.length > 0;
+      return bs.some(function (b) { return state.benefitCategoryFilter.has(b.category); });
+    }
+    var rs = state.model.risksByMilestone[mstUid] || [];
+    if (!state.riskRagFilter.size) return rs.length > 0;
+    return rs.some(function (r) { return state.riskRagFilter.has(r.rag); });
+  }
+
   function descendantHas(a, kind) {
     var memo = kind === 'benefit' ? _bnMemo : _rkMemo;
     if (a.uid in memo) return memo[a.uid];
-    var group = kind === 'benefit' ? state.model.benefitsByMilestone : state.model.risksByMilestone;
     var own = (state.model.milestonesByActivity[a.uid] || []).some(function (mm) {
-      return (group[mm.uid] || []).length > 0;
+      return milestoneMatches(mm.uid, kind);
     });
     var viaChild = a.childUids.some(function (cid) { return descendantHas(state.model.activityByUid[cid], kind); });
     return (memo[a.uid] = own || viaChild);
@@ -1297,7 +1404,7 @@ if (typeof module !== 'undefined' && module.exports) {
       var barColour = colourFor(m.lookups, 'Activities', 'Resourcing', a.resourcing, NEUTRAL_BAR);
       var rect = svgEl('rect', {
         class: 'bar', x: x0, y: barCy - barH / 2, width: Math.max(4, x1 - x0), height: barH,
-        rx: 4, ry: 4, fill: barColour, 'data-act': a.uid
+        rx: 4, ry: 4, fill: barColour, 'data-bar': a.uid
       });
       rowG.appendChild(rect);
     }
@@ -1414,6 +1521,24 @@ if (typeof module !== 'undefined' && module.exports) {
          + '<div>' + esc(theme.description) + '</div>';
   }
 
+  function buildActivityTooltip(uid) {
+    var m = state.model;
+    var a = m.activityByUid[uid];
+    if (!a) return null;
+    var html = '<div class="tt-kind">Activity</div><h4>' + esc(a.title) + '</h4>';
+    if (a.description) html += '<div>' + esc(a.description) + '</div>';
+    if (a.start || a.end) {
+      html += '<div><span class="tt-label">Dates:</span> '
+        + (a.start ? fmtDate(a.start) : '?') + ' – ' + (a.end ? fmtDate(a.end) : '?') + '</div>';
+    }
+    if (a.resourcing) {
+      var rc = colourFor(m.lookups, 'Activities', 'Resourcing', a.resourcing, NEUTRAL_BAR);
+      html += '<div><span class="tt-label">Resourcing:</span> <span class="tt-tag" style="background:'
+        + rc + '">' + esc(a.resourcing) + '</span></div>';
+    }
+    return html;
+  }
+
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
   function fmtDate(d) { return d.getDate() + ' ' + ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getFullYear(); }
 
@@ -1453,10 +1578,20 @@ if (typeof module !== 'undefined' && module.exports) {
     // Dropdown toggles
     wireDropdown('loe');
     wireDropdown('theme');
+    wireDropdown('benefit');
+    wireDropdown('risk');
 
     // Checkboxes
-    document.getElementById('only-benefit').addEventListener('change', function (e) { state.onlyBenefit = e.target.checked; render(); });
-    document.getElementById('only-risk').addEventListener('change', function (e) { state.onlyRisk = e.target.checked; render(); });
+    document.getElementById('only-benefit').addEventListener('change', function (e) {
+      state.onlyBenefit = e.target.checked;
+      syncRiskBenefitDropdownVisibility();
+      render();
+    });
+    document.getElementById('only-risk').addEventListener('change', function (e) {
+      state.onlyRisk = e.target.checked;
+      syncRiskBenefitDropdownVisibility();
+      render();
+    });
     document.getElementById('show-mst-labels').addEventListener('change', function (e) { state.showMstLabels = e.target.checked; render(); });
 
     document.getElementById('warn-badge').addEventListener('click', function () {
@@ -1469,10 +1604,12 @@ if (typeof module !== 'undefined' && module.exports) {
     var tooltip = document.getElementById('tooltip');
     body.addEventListener('mousemove', function (e) {
       var marker = e.target.closest('[data-mst]');
-      var themeEl = marker ? null : e.target.closest('[data-theme]');
-      if (!marker && !themeEl) { tooltip.hidden = true; return; }
+      var barEl = marker ? null : e.target.closest('[data-bar]');
+      var themeEl = (marker || barEl) ? null : e.target.closest('[data-theme]');
+      if (!marker && !barEl && !themeEl) { tooltip.hidden = true; return; }
       var html = marker ? buildTooltip(marker.getAttribute('data-mst'))
-                        : buildThemeTooltip(themeEl.getAttribute('data-theme'));
+               : barEl ? buildActivityTooltip(barEl.getAttribute('data-bar'))
+               : buildThemeTooltip(themeEl.getAttribute('data-theme'));
       if (!html) { tooltip.hidden = true; return; }
       tooltip.innerHTML = html;
       tooltip.hidden = false;
