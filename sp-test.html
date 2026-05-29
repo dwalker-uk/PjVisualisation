@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SharePoint Excel load test</title>
+
+<!--
+    ============================================================
+    sp-test.html  -  STANDALONE TEST HARNESS (throwaway)
+
+    Purpose: prove that a SharePoint-hosted .xlsx can be fetched
+    and parsed by SheetJS in the browser, BEFORE we touch the
+    roadmap tool (index.html). This file does not import or
+    modify index.html and can be deleted once testing is done.
+
+    How to use:
+      1. Local sanity check - open this file and use the manual
+         file input with test/sample-roadmap.xlsx. You should see
+         the sheet names and a preview of the first sheet. This
+         proves the SheetJS parse path works.
+      2. SharePoint check - upload THIS file into the same
+         SharePoint site/library as your workbook, set
+         WORKBOOK_URL below to the workbook's path, open the
+         uploaded page while logged in, and click "Load from URL".
+
+    Why same-origin matters: because this page is served from the
+    same SharePoint origin as the workbook, the browser sends your
+    auth cookies automatically, so a normal fetch() returns the
+    real file bytes - no CORS workaround, no Microsoft Graph, no
+    Azure AD app needed.
+    ============================================================
+-->
+
+<!-- SheetJS (same version/CDN as index.html) -->
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+
+<script id="test-config">
+    /* ============================================================
+       EDIT THIS: the workbook to fetch from SharePoint.
+
+       Try these forms in order until one works:
+
+       (a) Server-relative path (simplest):
+           '/sites/YourSite/Shared Documents/roadmap.xlsx'
+
+       (b) Full https URL (same SharePoint origin as this page):
+           'https://contoso.sharepoint.com/sites/YourSite/Shared%20Documents/roadmap.xlsx'
+
+       (c) SharePoint REST endpoint (use if (a)/(b) 302-redirect
+           to a login page instead of returning the file):
+           "/sites/YourSite/_api/web/GetFileByServerRelativeUrl('/sites/YourSite/Shared Documents/roadmap.xlsx')/$value"
+
+       Leave '' to only test the manual file-input path.
+       ============================================================ */
+    const WORKBOOK_URL = '';
+</script>
+
+<style>
+    :root { color-scheme: light dark; }
+    body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        max-width: 900px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.5;
+    }
+    h1 { font-size: 1.4rem; }
+    .row { margin: 1rem 0; }
+    button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        cursor: pointer;
+    }
+    code { background: rgba(128,128,128,0.18); padding: 0 0.25rem; border-radius: 3px; }
+    #status { font-weight: 600; }
+    .ok   { color: #1a7f37; }
+    .err  { color: #c0341d; }
+    pre {
+        background: rgba(128,128,128,0.12);
+        padding: 0.75rem;
+        border-radius: 6px;
+        overflow: auto;
+        max-height: 50vh;
+        white-space: pre-wrap;
+        word-break: break-word;
+    }
+    .hint { font-size: 0.85rem; opacity: 0.8; }
+    table { border-collapse: collapse; margin-top: 0.5rem; }
+    th, td { border: 1px solid rgba(128,128,128,0.4); padding: 2px 6px; font-size: 0.8rem; text-align: left; }
+</style>
+</head>
+
+<body>
+
+<h1>SharePoint Excel load test</h1>
+
+<p class="hint">
+    A throwaway harness to confirm we can fetch and parse a
+    SharePoint-hosted <code>.xlsx</code> before changing the roadmap tool.
+    Edit <code>WORKBOOK_URL</code> in the <code>&lt;script id="test-config"&gt;</code>
+    block at the top of this file.
+</p>
+
+<div class="row">
+    <strong>1. Fetch from SharePoint URL</strong><br>
+    <span class="hint">Current <code>WORKBOOK_URL</code>: <code id="url-echo"></code></span><br>
+    <button id="load-url-btn" style="margin-top:0.5rem;">Load from URL</button>
+</div>
+
+<div class="row">
+    <strong>2. Or pick a file manually (control test)</strong><br>
+    <input type="file" id="file-input" accept=".xlsx,.xls,.xlsm" style="margin-top:0.5rem;">
+</div>
+
+<div class="row">
+    <span id="status">Idle.</span>
+</div>
+
+<div id="output"></div>
+
+<script>
+    const statusEl = document.getElementById('status');
+    const outputEl = document.getElementById('output');
+    document.getElementById('url-echo').textContent = WORKBOOK_URL || '(not set)';
+
+    function setStatus(msg, kind) {
+        statusEl.textContent = msg;
+        statusEl.className = kind || '';
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, c => (
+            { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+        ));
+    }
+
+    // Shared parse + report path used by both the URL fetch and the
+    // manual file input - mirrors how index.html reads a workbook
+    // (XLSX.read with type 'array' + cellDates).
+    function reportWorkbook(buffer, sourceLabel) {
+
+        if (typeof XLSX === 'undefined' || !XLSX.read) {
+            setStatus('SheetJS failed to load (check your connection / CDN).', 'err');
+            return;
+        }
+
+        let wb;
+        try {
+            wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+        } catch (err) {
+            setStatus('Parsed bytes but XLSX.read failed: ' + err.message, 'err');
+            return;
+        }
+
+        const firstName = wb.SheetNames[0];
+        const firstSheet = wb.Sheets[firstName];
+        const rows = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: null, raw: true });
+        const preview = rows.slice(0, 5);
+
+        let html = '';
+        html += '<p class="ok"><strong>Success</strong> - parsed workbook from ' + escapeHtml(sourceLabel) + '.</p>';
+        html += '<p>Sheet names (' + wb.SheetNames.length + '): <code>'
+              + wb.SheetNames.map(escapeHtml).join('</code>, <code>') + '</code></p>';
+        html += '<p>First sheet <code>' + escapeHtml(firstName) + '</code> - first '
+              + preview.length + ' row(s):</p>';
+
+        html += '<table><tbody>';
+        for (const r of preview) {
+            html += '<tr>';
+            for (const cell of (r || [])) {
+                html += '<td>' + escapeHtml(cell == null ? '' : (cell instanceof Date ? cell.toISOString().slice(0,10) : cell)) + '</td>';
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+
+        outputEl.innerHTML = html;
+        setStatus('Loaded ' + wb.SheetNames.length + ' sheet(s) from ' + sourceLabel + '.', 'ok');
+    }
+
+    // ---- 1. Fetch from SharePoint URL -----------------------------------
+    document.getElementById('load-url-btn').addEventListener('click', async () => {
+
+        outputEl.innerHTML = '';
+
+        if (!WORKBOOK_URL) {
+            setStatus('WORKBOOK_URL is empty - edit it at the top of this file first.', 'err');
+            return;
+        }
+
+        setStatus('Fetching ' + WORKBOOK_URL + ' ...', '');
+
+        let res;
+        try {
+            res = await fetch(WORKBOOK_URL, {
+                credentials: 'same-origin',
+                headers: { 'Accept': 'application/octet-stream' },
+            });
+        } catch (err) {
+            setStatus('Network/CORS error: ' + err.message
+                + '  (Is this page served from the SAME SharePoint origin as the file? '
+                + 'A fetch from file:// or another domain will be blocked.)', 'err');
+            return;
+        }
+
+        if (!res.ok) {
+            setStatus('HTTP ' + res.status + ' ' + res.statusText
+                + '  (404 = wrong path; 401/403 = not logged in / no access; '
+                + 'a redirect to a login page usually means try the _api/$value form.)', 'err');
+            return;
+        }
+
+        // Detect the common "got an HTML login page instead of the file" case.
+        const ctype = (res.headers.get('content-type') || '').toLowerCase();
+        const buffer = await res.arrayBuffer();
+        if (ctype.includes('text/html')) {
+            setStatus('Got an HTML response (content-type ' + ctype + '), not a workbook - '
+                + 'this is usually a login/redirect page. Try the _api/.../$value URL form.', 'err');
+            return;
+        }
+
+        reportWorkbook(buffer, 'URL fetch (' + WORKBOOK_URL + ', content-type ' + (ctype || 'unknown') + ')');
+    });
+
+    // ---- 2. Manual file input (control test) ----------------------------
+    document.getElementById('file-input').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        outputEl.innerHTML = '';
+        setStatus('Reading ' + file.name + ' ...', '');
+        try {
+            const buffer = await file.arrayBuffer();
+            reportWorkbook(buffer, 'manual upload (' + file.name + ')');
+        } catch (err) {
+            setStatus('Could not read file: ' + err.message, 'err');
+        }
+        e.target.value = '';
+    });
+</script>
+
+</body>
+</html>
