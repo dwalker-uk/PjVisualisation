@@ -139,6 +139,20 @@ check('links milestones, benefits and risks by milestone uid', () => {
   assert.strictEqual((model.risksByMilestone['M2'] || []).length, 1);
 });
 
+check('ignores blank Benefit/Risk rows that only carry a formula Milestone ID', () => {
+  // Trailing rows where the Milestone ID is an auto-filled formula but every
+  // content column is empty must not appear as benefits/risks.
+  const m2 = assembleModel({
+    loesThemes, activities, milestones, lookups,
+    benefits: benefits.concat([['M1', null, null, null, null]]),
+    risks: risks.concat([['M2', '', '', '']])
+  });
+  assert.strictEqual(m2.benefits.length, 1, 'blank benefit row dropped');
+  assert.strictEqual(m2.risks.length, 1, 'blank risk row dropped');
+  assert.strictEqual((m2.benefitsByMilestone['M1'] || []).length, 1);
+  assert.strictEqual((m2.risksByMilestone['M2'] || []).length, 1);
+});
+
 check('resolves colours from Lookups, brand palette + literal fallback', () => {
   assert.strictEqual(colourFor(model.lookups, 'Activities', 'Resourcing', 'Funded'), '#79C68A');   // green
   assert.strictEqual(colourFor(model.lookups, 'Activities', 'Resourcing', 'Unfunded'), 'grey');     // literal CSS
