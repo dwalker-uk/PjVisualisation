@@ -641,6 +641,10 @@ function assembleModel(sheets) {
     .filter(function (m) { return m.activityUid; }); // parent column => skips trailing blank rows
 
   // --- Benefits & Risks ---
+  // The Milestone ID foreign key is often an auto-filled formula, so it can
+  // linger on an otherwise-blank trailing row of the Excel table. Unlike the
+  // other sheets there's no separate parent column to test, so we drop rows
+  // that have no actual content (every value besides the key column is empty).
   var benTbl = extractTable(sheets.benefits || [], ALIASES.benefits, ['milestoneUid'], {});
   var benefits = benTbl.records
     .map(function (r) {
@@ -652,7 +656,7 @@ function assembleModel(sheets) {
         impact: str(r.impact)
       };
     })
-    .filter(function (b) { return b.milestoneUid; });
+    .filter(function (b) { return b.milestoneUid && (b.title || b.category || b.beneficiary || b.impact); });
 
   var riskTbl = extractTable(sheets.risks || [], ALIASES.risks, ['milestoneUid'], {});
   var risks = riskTbl.records
@@ -664,7 +668,7 @@ function assembleModel(sheets) {
         rag: str(r.rag)
       };
     })
-    .filter(function (r) { return r.milestoneUid; });
+    .filter(function (r) { return r.milestoneUid && (r.title || r.owner || r.rag); });
 
   // --- Lookups ---
   var lookups = parseLookups(sheets.lookups || []);
@@ -778,8 +782,9 @@ if (typeof module !== 'undefined' && module.exports) {
     barHeight: 22,
     markerSize: 8,
     labelFont: 16,        // Activity title size (wraps within the label column)
-    mstLabelZone: 40,     // extra height per activity row when milestone labels shown
     mstLabelMaxWidth: 150, // most width a milestone label may take before wrapping
+    mstLabelMaxLines: 2,   // cap on the wrapped lines a milestone label may use
+    mstLabelLineHeight: 1.15, // line-height (em) for milestone labels
     minScale: 0.55,       // below this we stop shrinking and let the body scroll
     maxScale: 1.6         // cap on upscaling when there is spare vertical space
   };
@@ -1143,11 +1148,77 @@ if (typeof module !== 'undefined' && module.exports) {
 
   function depthRowHeight(depth, scale) {
     var base = depth === 1 ? LAYOUT.rowHeight : Math.max(30, LAYOUT.rowHeight - (depth - 1) * 6);
-    return base * scale + (state.showMstLabels ? LAYOUT.mstLabelZone * scale : 0);
+    return base * scale;  // milestone-label space is added per-activity (see mstLabelZoneFor)
   }
   function depthBarHeight(depth, scale) {
     var base = depth === 1 ? LAYOUT.barHeight : Math.max(10, LAYOUT.barHeight - (depth - 1) * 4);
     return base * scale;
+  }
+
+  /* ---- Milestone-label sizing (shared by layout + rendering) ---- */
+
+  /* Sorted x-positions of an activity's dated milestone markers. */
+  function milestonePoints(a, xForDate, clampX) {
+    return (state.model.milestonesByActivity[a.uid] || [])
+      .filter(function (mst) { return mst.date; })
+      .map(function (mst) { return { mst: mst, cx: xForDate(clampX(mst.date)) }; })
+      .sort(function (p, q) { return p.cx - q.cx; });
+  }
+
+  function mstLabelFontSize(scale) { return Math.max(9, 11 * Math.max(scale, 0.8)); }
+
+  /* Width a milestone label may occupy: bounded by the gap to its nearest
+     neighbour (so adjacent labels don't collide), capped at mstLabelMaxWidth. */
+  function mstLabelWidth(pts, i, scale) {
+    var cx = pts[i].cx;
+    var leftGap = i > 0 ? (cx - pts[i - 1].cx) : Infinity;
+    var rightGap = i < pts.length - 1 ? (pts[i + 1].cx - cx) : Infinity;
+    var neighbour = Math.min(leftGap, rightGap);
+    var maxW = LAYOUT.mstLabelMaxWidth * Math.max(scale, 0.85);
+    return Math.max(44 * Math.max(scale, 0.8), Math.min(maxW, isFinite(neighbour) ? neighbour - 6 : maxW));
+  }
+
+  /* Approximate how many lines a label wraps to in a given width. Word-aware
+     but only a near estimate (average glyph width ~0.55em) — exact wrapping
+     can't be known without measuring, but this is good enough to decide how
+     much vertical space to reserve. Capped at mstLabelMaxLines. */
+  function estimateLabelLines(text, width, fontSize) {
+    text = String(text == null ? '' : text).trim();
+    if (!text) return 0;
+    var maxChars = Math.max(1, Math.floor(width / (fontSize * 0.55)));
+    var words = text.split(/\s+/);
+    var lines = 1, len = 0;
+    words.forEach(function (w) {
+      var add = (len === 0 ? 0 : 1) + w.length;
+      if (len > 0 && len + add > maxChars) { lines++; len = w.length; }
+      else { len += add; }
+    });
+    return Math.min(LAYOUT.mstLabelMaxLines, lines);
+  }
+
+  /* Extra row height needed below the bar for this activity's milestone labels.
+     Zero when labels are off or the activity has no dated milestones, and only
+     as tall as the longest label is estimated to wrap. */
+  function mstLabelZoneFor(a, scale, xForDate, clampX) {
+    if (!state.showMstLabels) return 0;
+    var pts = milestonePoints(a, xForDate, clampX);
+    if (!pts.length) return 0;
+    var fs = mstLabelFontSize(scale);
+    var size = Math.max(5, LAYOUT.markerSize * Math.max(scale, 0.7));
+    var lines = 0;
+    pts.forEach(function (p, i) {
+      lines = Math.max(lines, estimateLabelLines(p.mst.title, mstLabelWidth(pts, i, scale), fs));
+    });
+    if (!lines) return 0;
+    // From the marker centre down to the bottom of the wrapped text, less the
+    // lower half of the bar row which is already available below the marker.
+    var need = size + 4 + lines * fs * LAYOUT.mstLabelLineHeight;
+    return Math.max(0, Math.ceil(need - depthRowHeight(a.depth, scale) / 2));
+  }
+
+  /* Upward "warning" triangle with a flat base, centred on (cx, cy). */
+  function trianglePoints(cx, cy, r) {
+    return cx + ',' + (cy - r) + ' ' + (cx + r) + ',' + (cy + r * 0.8) + ' ' + (cx - r) + ',' + (cy + r * 0.8);
   }
 
   /* ---------------- Rendering ---------------- */
@@ -1195,11 +1266,16 @@ if (typeof module !== 'undefined' && module.exports) {
       seq.push({ type: 'activity', activity: a });
     });
 
+    // Total height of one activity row, including any milestone-label space.
+    function activityRowHeight(a, sc) {
+      return depthRowHeight(a.depth, sc) + mstLabelZoneFor(a, sc, xForDate, clampX);
+    }
+
     // --- Auto-fit vertical scale ---
     function naturalHeight(scale) {
       var h = LAYOUT.bodyPadTop;
       seq.forEach(function (s) {
-        h += s.type === 'theme' ? LAYOUT.themeHeaderHeight * scale : depthRowHeight(s.activity.depth, scale);
+        h += s.type === 'theme' ? LAYOUT.themeHeaderHeight * scale : activityRowHeight(s.activity, scale);
       });
       return h + LAYOUT.bodyPadBottom;
     }
@@ -1233,7 +1309,7 @@ if (typeof module !== 'undefined' && module.exports) {
       } else {
         var a = s.activity;
         rowY[a.uid] = y;
-        rowH[a.uid] = depthRowHeight(a.depth, scale);
+        rowH[a.uid] = activityRowHeight(a, scale);
         s._y = y;
         y += rowH[a.uid];
       }
@@ -1363,7 +1439,7 @@ if (typeof module !== 'undefined' && module.exports) {
   function renderActivityRow(g, a, top, height, scale, xForDate, clampX, marginLeft) {
     var m = state.model;
     var barH = depthBarHeight(a.depth, scale);
-    var labelZone = state.showMstLabels ? LAYOUT.mstLabelZone * scale : 0;
+    var labelZone = mstLabelZoneFor(a, scale, xForDate, clampX);
     var barZoneH = height - labelZone;
     var barCy = top + barZoneH / 2;
     var indent = (a.depth - 1) * 16;
@@ -1412,12 +1488,9 @@ if (typeof module !== 'undefined' && module.exports) {
     // Milestones (diamond / star) + risk glyphs. Precompute x positions
     // (sorted) so each label can claim the space up to its nearest neighbour.
     var size = Math.max(5, LAYOUT.markerSize * Math.max(scale, 0.7));
-    var pts = (m.milestonesByActivity[a.uid] || [])
-      .filter(function (mst) { return mst.date; })
-      .map(function (mst) { return { mst: mst, cx: xForDate(clampX(mst.date)) }; })
-      .sort(function (p, q) { return p.cx - q.cx; });
+    var pts = milestonePoints(a, xForDate, clampX);
 
-    var mstLabelFs = Math.max(9, 11 * Math.max(scale, 0.8));
+    var mstLabelFs = mstLabelFontSize(scale);
     var rowBottom = top + barZoneH + labelZone;
 
     pts.forEach(function (p, i) {
@@ -1432,38 +1505,42 @@ if (typeof module !== 'undefined' && module.exports) {
       marker.setAttribute('data-mst', mst.uid);
       rowG.appendChild(marker);
 
-      // Risk: a single warning glyph (⚠), slightly smaller than the marker,
-      // placed ~45° down-and-right of it. The text variation selector forces a
-      // monochrome glyph so the RAG fill colour applies.
+      // Risk: a filled warning triangle placed ~45° down-and-right of the
+      // marker. The triangle is filled with the RAG colour and given a white
+      // outline plus a white exclamation mark, so it stays legible against the
+      // dark background (the old transparent glyph was hard to see).
       if (risks.length) {
         var rColour = colourFor(m.lookups, 'Risks', 'RAG', risks[0].rag, '#D41F41');
-        var off = size * 0.85;
-        var glyph = svgEl('text', {
-          class: 'risk-icon', 'data-mst': mst.uid,
-          x: cx + off, y: barCy + off,
-          'font-size': size * 2.0, 'text-anchor': 'middle', 'dominant-baseline': 'central',
-          fill: rColour, stroke: 'rgba(0,0,0,.55)', 'stroke-width': 0.6, 'paint-order': 'stroke'
+        var off = size * 0.95;
+        var rgx = cx + off, rgy = barCy + off, rr = size * 1.25;
+        var rg = svgEl('g', { class: 'risk-icon', 'data-mst': mst.uid });
+        rg.appendChild(svgEl('polygon', {
+          points: trianglePoints(rgx, rgy, rr),
+          fill: rColour, stroke: '#fff', 'stroke-width': Math.max(1, rr * 0.16),
+          'stroke-linejoin': 'round'
+        }));
+        var ex = svgEl('text', {
+          x: rgx, y: rgy + rr * 0.42, 'text-anchor': 'middle',
+          'font-size': rr * 1.15, 'font-weight': '700', fill: '#fff', 'pointer-events': 'none'
         });
-        glyph.textContent = '⚠︎'; // ⚠ + text variation selector (forces monochrome)
-        rowG.appendChild(glyph);
+        ex.textContent = '!';
+        rg.appendChild(ex);
+        rowG.appendChild(rg);
       }
 
       // Optional label under the marker. Width is limited by the closest
       // neighbouring milestone (so adjacent labels don't collide), capped at a
-      // sensible max; the label wraps to two fully-visible lines.
+      // sensible max; it wraps to only as many lines as it's estimated to need.
       if (state.showMstLabels) {
-        var leftGap = i > 0 ? (cx - pts[i - 1].cx) : Infinity;
-        var rightGap = i < pts.length - 1 ? (pts[i + 1].cx - cx) : Infinity;
-        var neighbour = Math.min(leftGap, rightGap);
-        var maxW = LAYOUT.mstLabelMaxWidth * Math.max(scale, 0.85);
-        var lw = Math.max(44 * Math.max(scale, 0.8), Math.min(maxW, isFinite(neighbour) ? neighbour - 6 : maxW));
-
-        var ly = barCy + size + 2;                 // nudged up, just below the marker
-        var lh = Math.max(mstLabelFs * 2.4, rowBottom - ly);
+        var lw = mstLabelWidth(pts, i, scale);
+        var lines = estimateLabelLines(mst.title, lw, mstLabelFs) || 1;
+        var ly = barCy + size + 2;                 // just below the marker
+        var lh = Math.max(lines * mstLabelFs * LAYOUT.mstLabelLineHeight, rowBottom - ly);
         var lfo = svgEl('foreignObject', { x: cx - lw / 2, y: ly, width: lw, height: lh });
         var ldiv = document.createElementNS(XHTML_NS, 'div');
         ldiv.className = 'marker-label';
-        ldiv.style.cssText = 'font-size:' + mstLabelFs + 'px;line-height:1.15;';
+        ldiv.style.cssText = 'font-size:' + mstLabelFs + 'px;line-height:' + LAYOUT.mstLabelLineHeight
+          + ';-webkit-line-clamp:' + lines + ';';
         ldiv.textContent = mst.title;
         lfo.appendChild(ldiv);
         rowG.appendChild(lfo);
