@@ -662,10 +662,12 @@ Private Sub DrawActivityRow(sld As Object, idx As Long, top As Single, showMstLa
 
         If showMstLabels Then
             ' Width bounded by the gap to the nearest neighbour to limit overlap.
+            ' Note: avoid IIf here -- it evaluates BOTH branches, so cxs(j - 1) /
+            ' cxs(j + 1) would read out of bounds at the first/last marker.
             Dim leftGap As Single, rightGap As Single, neighbour As Single
-            leftGap = IIf(j > 1, cx - cxs(j - 1), 9999)
-            rightGap = IIf(j < cnt, cxs(j + 1) - cx, 9999)
-            neighbour = IIf(leftGap < rightGap, leftGap, rightGap)
+            If j > 1 Then leftGap = cx - cxs(j - 1) Else leftGap = 9999
+            If j < cnt Then rightGap = cxs(j + 1) - cx Else rightGap = 9999
+            neighbour = leftGap: If rightGap < neighbour Then neighbour = rightGap
             Dim lw As Single: lw = 90
             If neighbour - 4 < lw Then lw = neighbour - 4
             If lw < 36 Then lw = 36
