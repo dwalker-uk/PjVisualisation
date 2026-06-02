@@ -601,7 +601,8 @@ Private Sub ParseLookupsSheet()
                 If Not valDict.Exists(LCase$(valTxt)) Then valDict.Add LCase$(valTxt), clr
                 idx = idx + 1
             Next r
-            mLookupColour(tbl & "|" & col) = valDict
+            ' Dictionary item holding an object must be assigned with Set.
+            Set mLookupColour(tbl & "|" & col) = valDict
         End If
     Next c
 End Sub
