@@ -875,18 +875,18 @@ Private Function BuildBenefitMap() As Object
     cC = ColIdx(lo, Array("category"))
     cB = ColIdx(lo, Array("beneficiary"))
     cI = ColIdx(lo, Array("impact"))
-    Dim r As Long, mid As String, t As String, cat As String, ben As String, imp As String
+    Dim r As Long, mid As String, t As String, cat As String, ben As String, impact As String
     For r = 1 To RowCount(lo)
         mid = CellStr(lo, r, cM)
         t = CellStr(lo, r, cT): cat = CellStr(lo, r, cC)
-        ben = CellStr(lo, r, cB): imp = CellStr(lo, r, cI)
+        ben = CellStr(lo, r, cB): impact = CellStr(lo, r, cI)
         ' Drop trailing blank rows whose only value is the auto-filled key.
-        If mid <> "" And (t <> "" Or cat <> "" Or ben <> "" Or imp <> "") Then
+        If mid <> "" And (t <> "" Or cat <> "" Or ben <> "" Or impact <> "") Then
             If Not d.Exists(LCase$(mid)) Then
                 Dim tip As String: tip = t
                 If cat <> "" Then tip = tip & " [" & cat & "]"
                 If ben <> "" Then tip = tip & " - " & ben
-                If imp <> "" Then tip = tip & " - " & imp
+                If impact <> "" Then tip = tip & " - " & impact
                 d.Add LCase$(mid), tip
             End If
         End If
