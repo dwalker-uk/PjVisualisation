@@ -68,16 +68,21 @@ schema.
 Add a worksheet named **`Roadmap Settings`** (or `Settings`) with labels in
 column **A** and values in column **B**:
 
-| A (label)               | B (value)                          | Default                  |
-|-------------------------|------------------------------------|--------------------------|
-| `Title`                 | Slide title text                   | `Programme Roadmap`      |
-| `Start Date`            | A date (any day in the month)      | First of current month   |
-| `End Date`              | A date                             | Current month + 12       |
-| `Max Level`             | Deepest activity level to show     | `1`                      |
-| `Show Milestone Labels` | `TRUE` / `FALSE`                   | `FALSE`                  |
+| A (label)               | B (value)                                   | Default                  |
+|-------------------------|---------------------------------------------|--------------------------|
+| `Title`                 | Slide title text                            | `Programme Roadmap`      |
+| `Start Date`            | A date (any day in the month)               | First of current month   |
+| `End Date`              | A date                                      | Current month + 12       |
+| `Max Level`             | Deepest activity level to show              | `1`                      |
+| `Show Milestone Labels` | `TRUE` / `FALSE`                            | `FALSE`                  |
+| `LOEs`                  | Comma-separated LOE titles (or IDs); blank = all | all                 |
+| `Themes`                | Comma-separated Theme titles (or IDs); blank = all | all               |
+| `Only With Benefit`     | `TRUE` / `FALSE` — hide activities with no benefit milestone | `FALSE`  |
+| `Only With Risk`        | `TRUE` / `FALSE` — hide activities with no risk milestone     | `FALSE`  |
 
 The date window is clamped to the data's own min/max, matching the web tool.
-If no settings sheet exists, all defaults apply.
+If no settings sheet exists, all defaults apply. Filters match on either the
+title or the ID, case-insensitively, so `LOEs` = `Digital, Estates` works.
 
 ## What it draws
 
@@ -92,17 +97,27 @@ If no settings sheet exists, all defaults apply.
 - **Milestones** — a **diamond**, or a **star** if the milestone has a Benefit,
   coloured by **Delivery Confidence**; with a small **warning triangle**
   adjacent if it has a Risk, coloured by the Risk **RAG**.
-- Rows auto-scale down to fit one slide (PowerPoint can't scroll); below a floor
-  they overflow rather than becoming unreadable.
+- **Milestone labels** (when enabled) now sit in dedicated space *below* the bar,
+  so they no longer hide under the activity bars.
+- **Hover detail** — every bar and milestone carries a pop-up **ScreenTip**:
+  activity dates/resourcing/description, and for milestones the date, delivery
+  confidence, owner, plus any benefit and risk detail. ScreenTips appear on
+  hover in **Slide Show** view. The same text is also stored as the shape's
+  **alt text** (a reliable fallback, visible via right-click ▸ Edit Alt Text).
+- **Multiple slides** — when the rows don't fit one slide (especially with
+  `Max Level` > 1), the roadmap **splits across slides**. The date axis repeats
+  on each slide, a Theme that spans a break is repeated with a `(cont.)` marker,
+  and a `Slide x of y` footer is added.
 
 ## Known limitations of this PoC
 
-- One slide; no pagination yet for very large programmes (would split across
-  slides or add a "fit to N slides" option).
-- No interactive filters, hover popups, or expand/collapse — those were the
-  parts we agreed to trade away for static output. LOE/Theme filtering can be
-  added as further settings.
-- Milestone-label collision avoidance is simpler than the web tool's.
+- **Hover ScreenTips show in Slide Show view**, not while editing — that's a
+  PowerPoint constraint. The detail is always available as alt text too.
+- **Expand/collapse** is not interactive; instead, `Max Level` chooses the depth
+  up front (and deeper levels paginate across slides).
+- Milestone-label collision avoidance is simpler than the web tool's: labels are
+  width-bounded by their neighbours but may still abbreviate when crowded.
+- Filters are driven from the settings sheet rather than live dropdowns.
 - Text wrapping/fit is PowerPoint's own, so very long labels may clip.
 
-These are all straightforward to extend once the core approach is approved.
+These are all straightforward to extend further once the approach is approved.
