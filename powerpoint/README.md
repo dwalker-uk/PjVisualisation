@@ -81,6 +81,7 @@ column **A** and values in column **B**:
 | `Only With Benefit`     | `TRUE` / `FALSE` — hide activities with no benefit milestone | `FALSE`  |
 | `Only With Risk`        | `TRUE` / `FALSE` — hide activities with no risk milestone     | `FALSE`  |
 | `Details Appendix`      | `TRUE` / `FALSE` — append milestone-detail table slides       | `FALSE`  |
+| `Tip Link`              | Hover-tip link target: blank = source workbook, `none` = in-file only, or a URL | source workbook |
 
 The date window is clamped to the data's own min/max, matching the web tool.
 If no settings sheet exists, all defaults apply. Filters match on either the
@@ -106,6 +107,12 @@ title or the ID, case-insensitively, so `LOEs` = `Digital, Estates` works.
   confidence, owner, plus any benefit and risk detail. ScreenTips appear on
   hover in **Slide Show** view. The same text is also stored as the shape's
   **alt text** (a reliable fallback, visible via right-click ▸ Edit Alt Text).
+  The tip is attached to an **external hyperlink** (the source workbook by
+  default), so the detail **survives copying a slide into another deck** —
+  PowerPoint drops custom ScreenTips from *internal* slide-links on copy, but
+  keeps them on external ones. Clicking a marker therefore opens the link
+  target; set `Tip Link` to a custom URL, or to `none` to revert to an in-file
+  no-op link (tips then work only in the generated file).
 - **Multiple slides** — when the rows don't fit one slide (especially with
   `Max Level` > 1), the roadmap **splits across slides**. The date axis repeats
   on each slide, a Theme that spans a break is repeated with a `(cont.)` marker,
@@ -122,6 +129,10 @@ title or the ID, case-insensitively, so `LOEs` = `Digital, Estates` works.
 - **Hover ScreenTips show in Slide Show view**, not while editing — that's a
   PowerPoint constraint. The detail is always available as alt text, and the
   `Details Appendix` slides give a fully visible alternative.
+- Hover tips ride on a hyperlink, so **clicking a marker follows the `Tip Link`**
+  (the source workbook by default). Set `Tip Link` = `none` if you'd rather a
+  marker click did nothing — at the cost of tips no longer surviving a copy into
+  another deck.
 - **Expand/collapse** is not interactive; instead, `Max Level` chooses the depth
   up front (and deeper levels paginate across slides).
 - Milestone-label collision avoidance is simpler than the web tool's: labels are
