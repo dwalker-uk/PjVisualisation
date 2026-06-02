@@ -662,10 +662,12 @@ Private Sub DrawActivityRow(sld As Object, idx As Long, top As Single, showMstLa
 
         If showMstLabels Then
             ' Width bounded by the gap to the nearest neighbour to limit overlap.
+            ' Note: avoid IIf here -- it evaluates BOTH branches, so cxs(j - 1) /
+            ' cxs(j + 1) would read out of bounds at the first/last marker.
             Dim leftGap As Single, rightGap As Single, neighbour As Single
-            leftGap = IIf(j > 1, cx - cxs(j - 1), 9999)
-            rightGap = IIf(j < cnt, cxs(j + 1) - cx, 9999)
-            neighbour = IIf(leftGap < rightGap, leftGap, rightGap)
+            If j > 1 Then leftGap = cx - cxs(j - 1) Else leftGap = 9999
+            If j < cnt Then rightGap = cxs(j + 1) - cx Else rightGap = 9999
+            neighbour = leftGap: If rightGap < neighbour Then neighbour = rightGap
             Dim lw As Single: lw = 90
             If neighbour - 4 < lw Then lw = neighbour - 4
             If lw < 36 Then lw = 36
@@ -875,18 +877,18 @@ Private Function BuildBenefitMap() As Object
     cC = ColIdx(lo, Array("category"))
     cB = ColIdx(lo, Array("beneficiary"))
     cI = ColIdx(lo, Array("impact"))
-    Dim r As Long, mid As String, t As String, cat As String, ben As String, imp As String
+    Dim r As Long, mid As String, t As String, cat As String, ben As String, impact As String
     For r = 1 To RowCount(lo)
         mid = CellStr(lo, r, cM)
         t = CellStr(lo, r, cT): cat = CellStr(lo, r, cC)
-        ben = CellStr(lo, r, cB): imp = CellStr(lo, r, cI)
+        ben = CellStr(lo, r, cB): impact = CellStr(lo, r, cI)
         ' Drop trailing blank rows whose only value is the auto-filled key.
-        If mid <> "" And (t <> "" Or cat <> "" Or ben <> "" Or imp <> "") Then
+        If mid <> "" And (t <> "" Or cat <> "" Or ben <> "" Or impact <> "") Then
             If Not d.Exists(LCase$(mid)) Then
                 Dim tip As String: tip = t
                 If cat <> "" Then tip = tip & " [" & cat & "]"
                 If ben <> "" Then tip = tip & " - " & ben
-                If imp <> "" Then tip = tip & " - " & imp
+                If impact <> "" Then tip = tip & " - " & impact
                 d.Add LCase$(mid), tip
             End If
         End If
