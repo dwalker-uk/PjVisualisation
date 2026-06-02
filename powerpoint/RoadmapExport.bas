@@ -1,4 +1,3 @@
-Attribute VB_Name = "RoadmapExport"
 ' =====================================================================
 '  RoadmapExport  -  Excel VBA -> PowerPoint roadmap generator
 '  Proof-of-concept companion to roadmap.html.

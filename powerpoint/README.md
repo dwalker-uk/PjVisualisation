@@ -35,9 +35,15 @@ PowerPoint; an Office Add-in is the more future-proof but heavier alternative.)
 ## Install
 
 1. Open the data workbook in Excel.
-2. `Alt`+`F11` → **File ▸ Import File…** → choose `RoadmapExport.bas`.
+2. `Alt`+`F11` to open the VBA editor, then add the module either way:
+   - **Import (cleanest):** **File ▸ Import File…** → choose `RoadmapExport.bas`.
+   - **Paste:** **Insert ▸ Module**, then paste in the file's contents.
 3. (Optional) add a settings sheet — see below.
 4. Save the workbook as **.xlsm** (macro-enabled) if you want to keep the macro.
+
+> If you see a syntax error on the very first line, you pasted a copy that
+> still had an `Attribute VB_Name = …` line at the top — delete that one line.
+> (The committed `.bas` no longer has it, so a fresh copy pastes cleanly.)
 
 ## Run
 
