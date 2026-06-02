@@ -1,4 +1,3 @@
-Attribute VB_Name = "RoadmapExport"
 ' =====================================================================
 '  RoadmapExport  -  Excel VBA -> PowerPoint roadmap generator
 '  Proof-of-concept companion to roadmap.html.
@@ -46,6 +45,8 @@ Private Const ppAlignLeft As Long = 1
 Private Const ppAlignCenter As Long = 2
 Private Const ppAlignRight As Long = 3
 Private Const msoAnchorMiddle As Long = 3
+Private Const ppMouseClick As Long = 1
+Private Const ppActionHyperlink As Long = 7
 
 ' ---- Layout constants, in POINTS (1 inch = 72pt). 16:9 slide = 960x540.
 '      Direct analogues of the LAYOUT object in roadmap.html. ----
@@ -58,10 +59,14 @@ Private Const TITLE_H As Single = 30
 Private Const AXIS_H As Single = 26
 Private Const BODY_PAD_TOP As Single = 4
 Private Const BODY_PAD_BOTTOM As Single = 10
-Private Const ROW_H As Single = 22           ' depth-1 row height
+Private Const FOOTER_H As Single = 16        ' page-number strip at the foot
+Private Const APPENDIX_ROWS As Long = 16     ' milestone rows per appendix slide
+Private Const THEME_H As Single = 18         ' theme-header band height
+Private Const BAR_ZONE As Single = 20        ' height holding the activity bar
+Private Const LABEL_ZONE As Single = 16      ' extra height reserved BELOW the bar
+                                             ' for milestone labels (when shown)
 Private Const BAR_H As Single = 11
 Private Const MARKER As Single = 5           ' diamond half-size
-Private Const MIN_ROW_H As Single = 12       ' floor before we just overflow
 
 ' ---- Brand palette (hex -> RGB long). Mirrors BRAND_COLOURS. ----
 Private mBrand As Object          ' name -> RGB long
@@ -77,6 +82,7 @@ Private Type TActivity
     actId As String
     themeId As String
     title As String
+    descr As String
     hasStart As Boolean
     sDate As Date
     hasEnd As Boolean
@@ -85,15 +91,33 @@ Private Type TActivity
     depth As Long
 End Type
 
+' Render settings, read from the optional "Roadmap Settings" sheet.
+Private Type TSettings
+    title As String
+    dStart As Date
+    dEnd As Date
+    maxLevel As Long
+    showMstLabels As Boolean
+    loeFilter As String       ' comma-separated LOE titles/IDs; "" = all
+    themeFilter As String     ' comma-separated Theme titles/IDs; "" = all
+    onlyBenefit As Boolean    ' hide activities with no benefit milestone
+    onlyRisk As Boolean       ' hide activities with no risk milestone
+    detailsAppendix As Boolean ' append milestone/benefit/risk detail table slides
+End Type
+
 Private Type TMilestone
     activityUid As String
     title As String
+    descr As String
+    owner As String
     hasDate As Boolean
     mDate As Date
     confidence As String
     hasBenefit As Boolean
+    benefitTip As String
     hasRisk As Boolean
     riskRag As String
+    riskTip As String
 End Type
 
 Private mLOEtitle As Object       ' loeId -> title (ordered via mLOEorder)
@@ -118,9 +142,20 @@ Public Sub GenerateRoadmap()
     BuildModel
 
     ' --- Settings (sheet "Roadmap Settings" or sensible defaults) ---
-    Dim title As String, maxLevel As Long, showMstLabels As Boolean
-    Dim dStart As Date, dEnd As Date
-    ReadSettings title, dStart, dEnd, maxLevel, showMstLabels
+    Dim s As TSettings: s = ReadSettings()
+
+    ' --- Shared timeline geometry (identical across every slide) ---
+    Dim minDate As Date, maxDate As Date, totalMonths As Long
+    minDate = FirstOfMonth(s.dStart)
+    maxDate = AddMonths(FirstOfMonth(s.dEnd), 1)       ' exclusive boundary
+    totalMonths = MonthsBetween(minDate, maxDate)
+    If totalMonths < 1 Then totalMonths = 1
+    Dim plotLeft As Single, monthW As Single
+    plotLeft = LOE_GUTTER + LABEL_WIDTH
+    monthW = ((SLIDE_W - MARGIN_RIGHT) - plotLeft) / totalMonths
+
+    ' --- Build the filtered vertical sequence, then split across slides ---
+    Dim seq As Collection: Set seq = BuildSequence(s)
 
     ' --- Drive PowerPoint via late binding (no reference required) ---
     Dim ppt As Object, pres As Object, sld As Object
@@ -134,129 +169,352 @@ Public Sub GenerateRoadmap()
     Set pres = ppt.Presentations.Add
     pres.PageSetup.SlideWidth = SLIDE_W
     pres.PageSetup.SlideHeight = SLIDE_H
-    Set sld = pres.Slides.Add(1, ppLayoutBlank)
 
-    ' Navy background (#071D49) to match branding.
-    sld.FollowMasterBackground = msoFalse
-    sld.Background.Fill.Solid
-    sld.Background.Fill.ForeColor.RGB = RGBlong(7, 29, 73)
+    If seq.Count = 0 Then
+        Set sld = pres.Slides.Add(1, ppLayoutBlank): StyleSlideBg sld
+        AddText sld, 0, 0, SLIDE_W, TITLE_H, s.title, 18, True, RGBlong(255, 255, 255), ppAlignLeft, LOE_GUTTER + 6
+        DrawAxis sld, TITLE_H, minDate, totalMonths, monthW, plotLeft
+        AddText sld, plotLeft, TITLE_H + AXIS_H + 8, 400, 40, _
+                "No activities to display for the chosen settings.", 14, False, _
+                RGBlong(255, 255, 255), ppAlignLeft, 0
+        MsgBox "No activities matched the chosen settings.", vbInformation
+        Exit Sub
+    End If
 
-    DrawSlide sld, title, dStart, dEnd, maxLevel, showMstLabels
+    Dim pages As Collection: Set pages = Paginate(seq, s.showMstLabels)
+    Dim p As Long
+    For p = 1 To pages.Count
+        Set sld = pres.Slides.Add(p, ppLayoutBlank)
+        StyleSlideBg sld
+        DrawPage sld, pages(p), s, p, pages.Count, minDate, maxDate, totalMonths, monthW, plotLeft
+    Next p
 
-    MsgBox "Roadmap slide generated in PowerPoint.", vbInformation
+    ' --- Optional details appendix: full milestone/benefit/risk tables.
+    '     A presentation-friendly alternative to the hover ScreenTips. ---
+    Dim appendixSlides As Long: appendixSlides = 0
+    If s.detailsAppendix Then appendixSlides = DrawAppendixSlides(pres, seq, s)
+
+    MsgBox "Roadmap generated: " & pages.Count & " roadmap slide(s)" & _
+           IIf(appendixSlides > 0, " + " & appendixSlides & " detail slide(s)", "") & ".", vbInformation
     Exit Sub
 Fail:
     MsgBox "Roadmap export failed: " & Err.Number & " - " & Err.Description, vbExclamation
 End Sub
 
+' Navy (#071D49) slide background to match branding.
+Private Sub StyleSlideBg(sld As Object)
+    sld.FollowMasterBackground = msoFalse
+    sld.Background.Fill.Solid
+    sld.Background.Fill.ForeColor.RGB = RGBlong(7, 29, 73)
+End Sub
+
 ' =====================================================================
-'  DRAWING
+'  SEQUENCE + PAGINATION
+'  A "render item" is Array(type$, themeId$, actIdx&, loeId$, cont?):
+'    type "theme" -> a theme header (cont=True draws a "(cont.)" repeat)
+'    type "act"   -> an activity row (actIdx indexes mActs)
 ' =====================================================================
-Private Sub DrawSlide(sld As Object, title As String, dStart As Date, dEnd As Date, _
-                      maxLevel As Long, showMstLabels As Boolean)
-    Dim minDate As Date, maxDate As Date, totalMonths As Long
-    minDate = FirstOfMonth(dStart)
-    maxDate = AddMonths(FirstOfMonth(dEnd), 1)        ' exclusive boundary
-    totalMonths = MonthsBetween(minDate, maxDate)
-    If totalMonths < 1 Then totalMonths = 1
-
-    Dim plotLeft As Single, plotRight As Single, plotW As Single, monthW As Single
-    plotLeft = LOE_GUTTER + LABEL_WIDTH
-    plotRight = SLIDE_W - MARGIN_RIGHT
-    plotW = plotRight - plotLeft
-    monthW = plotW / totalMonths
-
-    Dim bodyTop As Single
-    bodyTop = TITLE_H + AXIS_H + BODY_PAD_TOP
-
-    ' ---- Title ----
-    AddText sld, 0, 0, SLIDE_W, TITLE_H, title, 18, True, RGBlong(255, 255, 255), _
-            ppAlignLeft, LOE_GUTTER + 6
-
-    ' ---- Build the visible vertical sequence (theme headers + activity rows),
-    '      mirroring roadmap.html: LOEs in order -> Themes -> Activities. ----
-    Dim seqType() As String, seqId() As String, seqIdx() As Long, seqLoe() As String
-    Dim n As Long: n = 0
-    ReDim seqType(1 To 1): ReDim seqId(1 To 1): ReDim seqIdx(1 To 1): ReDim seqLoe(1 To 1)
+Private Function BuildSequence(s As TSettings) As Collection
+    Dim out As Collection: Set out = New Collection
+    Dim loeSet As Object: Set loeSet = BuildFilterSet(s.loeFilter)
+    Dim themeSet As Object: Set themeSet = BuildFilterSet(s.themeFilter)
 
     Dim li As Long, loeId As String
     For li = 1 To mLOEorder.Count
         loeId = mLOEorder(li)
-        If mThemesByLoe.Exists(loeId) Then
+        If IncludeLoe(loeId, loeSet) And mThemesByLoe.Exists(loeId) Then
             Dim themes As Collection: Set themes = mThemesByLoe(loeId)
             Dim ti As Long, themeId As String
             For ti = 1 To themes.Count
                 themeId = themes(ti)
-                ' Does this theme have any visible activity? Collect them first.
-                Dim actIdxs As Collection: Set actIdxs = New Collection
-                If mActsByTheme.Exists(themeId) Then
-                    Dim c As Collection: Set c = mActsByTheme(themeId)
-                    Dim ai As Long
-                    For ai = 1 To c.Count
-                        If mActs(c(ai)).depth <= maxLevel Then actIdxs.Add c(ai)
-                    Next ai
-                End If
-                If actIdxs.Count > 0 Then
-                    n = n + 1: GrowSeq seqType, seqId, seqIdx, seqLoe, n
-                    seqType(n) = "theme": seqId(n) = themeId: seqLoe(n) = loeId
-                    For ai = 1 To actIdxs.Count
-                        n = n + 1: GrowSeq seqType, seqId, seqIdx, seqLoe, n
-                        seqType(n) = "act": seqIdx(n) = actIdxs(ai): seqLoe(n) = loeId
-                    Next ai
+                If IncludeTheme(themeId, themeSet) Then
+                    ' Collect this theme's visible activities first.
+                    Dim actIdxs As Collection: Set actIdxs = New Collection
+                    If mActsByTheme.Exists(themeId) Then
+                        Dim c As Collection: Set c = mActsByTheme(themeId)
+                        Dim ai As Long
+                        For ai = 1 To c.Count
+                            If mActs(c(ai)).depth <= s.maxLevel Then
+                                If ActPasses(c(ai), s.onlyBenefit, s.onlyRisk) Then actIdxs.Add c(ai)
+                            End If
+                        Next ai
+                    End If
+                    If actIdxs.Count > 0 Then
+                        out.Add Array("theme", themeId, 0&, loeId, False)
+                        For ai = 1 To actIdxs.Count
+                            out.Add Array("act", "", actIdxs(ai), loeId, False)
+                        Next ai
+                    End If
                 End If
             Next ti
         End If
     Next li
+    Set BuildSequence = out
+End Function
 
-    If n = 0 Then
-        AddText sld, plotLeft, bodyTop, plotW, 40, "No activities to display for the chosen settings.", _
-                14, False, RGBlong(255, 255, 255), ppAlignLeft, 0
-        DrawAxis sld, TITLE_H, minDate, totalMonths, monthW, plotLeft
-        Exit Sub
-    End If
+' Split the sequence into pages that each fit one slide's body height.
+Private Function Paginate(seq As Collection, showLabels As Boolean) As Collection
+    Dim bodyTop As Single: bodyTop = TITLE_H + AXIS_H + BODY_PAD_TOP
+    Dim availH As Single: availH = SLIDE_H - bodyTop - BODY_PAD_BOTTOM - FOOTER_H
 
-    ' ---- Auto-fit vertical scale: shrink rows so everything fits the slide
-    '      (PowerPoint can't scroll), with a floor before we just overflow. ----
-    Dim themeCount As Long, actCount As Long, i As Long
-    For i = 1 To n
-        If seqType(i) = "theme" Then themeCount = themeCount + 1 Else actCount = actCount + 1
+    Dim pages As Collection: Set pages = New Collection
+    Dim page As Collection: Set page = New Collection
+    Dim curH As Single: curH = 0
+    Dim curTheme As String, curThemeLoe As String
+
+    Dim i As Long, item As Variant, h As Single
+    For i = 1 To seq.Count
+        item = seq(i)
+        If item(0) = "theme" Then curTheme = item(1): curThemeLoe = item(3)
+        h = ItemHeight(item, showLabels)
+
+        ' Avoid orphaning a theme header at the very foot of a page.
+        If item(0) = "theme" And page.Count > 0 And (curH + THEME_H + BAR_ZONE > availH) Then
+            pages.Add page: Set page = New Collection: curH = 0
+        End If
+
+        ' Overflow -> new page. If we broke mid-theme, repeat the theme header.
+        If curH + h > availH And page.Count > 0 Then
+            pages.Add page: Set page = New Collection: curH = 0
+            If item(0) = "act" And curTheme <> "" Then
+                page.Add Array("theme", curTheme, 0&, curThemeLoe, True)
+                curH = curH + THEME_H
+            End If
+        End If
+
+        page.Add item: curH = curH + h
     Next i
-    Dim themeHdrH As Single: themeHdrH = 18
-    Dim availH As Single: availH = SLIDE_H - bodyTop - BODY_PAD_BOTTOM
-    Dim natural As Single: natural = themeCount * themeHdrH + actCount * ROW_H
-    Dim sc As Single: sc = 1
-    If natural > availH Then sc = availH / natural
-    Dim rowH As Single, thH As Single
-    rowH = ROW_H * sc: If rowH < MIN_ROW_H Then rowH = MIN_ROW_H
-    thH = themeHdrH * sc: If thH < 14 Then thH = 14
-    Dim barH As Single: barH = BAR_H * sc: If barH < 7 Then barH = 7
+    If page.Count > 0 Then pages.Add page
+    Set Paginate = pages
+End Function
 
-    ' ---- Month gridlines + axis header ----
+Private Function ItemHeight(item As Variant, showLabels As Boolean) As Single
+    If item(0) = "theme" Then ItemHeight = THEME_H Else ItemHeight = ActRowHeight(CLng(item(2)), showLabels)
+End Function
+
+Private Function ActRowHeight(idx As Long, showLabels As Boolean) As Single
+    ActRowHeight = BAR_ZONE
+    If showLabels And ActHasDatedMst(idx) Then ActRowHeight = ActRowHeight + LABEL_ZONE
+End Function
+
+Private Function ActHasDatedMst(idx As Long) As Boolean
+    Dim uid As String: uid = mActs(idx).uid
+    If Not mMstByActivity.Exists(uid) Then Exit Function
+    Dim coll As Collection: Set coll = mMstByActivity(uid)
+    Dim k As Long
+    For k = 1 To coll.Count
+        If mMsts(coll(k)).hasDate Then ActHasDatedMst = True: Exit Function
+    Next k
+End Function
+
+' Whether an activity passes the "only with benefit/risk" filters.
+Private Function ActPasses(idx As Long, onlyBenefit As Boolean, onlyRisk As Boolean) As Boolean
+    If Not onlyBenefit And Not onlyRisk Then ActPasses = True: Exit Function
+    Dim hasB As Boolean, hasR As Boolean
+    Dim uid As String: uid = mActs(idx).uid
+    If mMstByActivity.Exists(uid) Then
+        Dim coll As Collection: Set coll = mMstByActivity(uid)
+        Dim k As Long
+        For k = 1 To coll.Count
+            If mMsts(coll(k)).hasBenefit Then hasB = True
+            If mMsts(coll(k)).hasRisk Then hasR = True
+        Next k
+    End If
+    ActPasses = True
+    If onlyBenefit And Not hasB Then ActPasses = False
+    If onlyRisk And Not hasR Then ActPasses = False
+End Function
+
+Private Function IncludeLoe(loeId As String, loeSet As Object) As Boolean
+    If loeSet.Count = 0 Then IncludeLoe = True: Exit Function
+    If loeSet.Exists(LCase$(loeId)) Then IncludeLoe = True: Exit Function
+    If mLOEtitle.Exists(loeId) Then IncludeLoe = loeSet.Exists(LCase$(mLOEtitle(loeId)))
+End Function
+
+Private Function IncludeTheme(themeId As String, themeSet As Object) As Boolean
+    If themeSet.Count = 0 Then IncludeTheme = True: Exit Function
+    If themeSet.Exists(LCase$(themeId)) Then IncludeTheme = True: Exit Function
+    If mThemeTitle.Exists(themeId) Then IncludeTheme = themeSet.Exists(LCase$(mThemeTitle(themeId)))
+End Function
+
+' Comma-separated list -> set of lower-cased tokens (empty set = "all").
+Private Function BuildFilterSet(csv As String) As Object
+    Dim d As Object: Set d = NewDict
+    If Trim$(csv) = "" Then Set BuildFilterSet = d: Exit Function
+    Dim parts() As String: parts = Split(csv, ",")
+    Dim i As Long, t As String
+    For i = LBound(parts) To UBound(parts)
+        t = LCase$(Trim$(parts(i)))
+        If t <> "" And Not d.Exists(t) Then d.Add t, True
+    Next i
+    Set BuildFilterSet = d
+End Function
+
+' =====================================================================
+'  DRAWING A SINGLE SLIDE (one page of the sequence)
+' =====================================================================
+Private Sub DrawPage(sld As Object, page As Collection, s As TSettings, pageNo As Long, _
+                     pageCount As Long, minDate As Date, maxDate As Date, totalMonths As Long, _
+                     monthW As Single, plotLeft As Single)
+    Dim bodyTop As Single: bodyTop = TITLE_H + AXIS_H + BODY_PAD_TOP
+    Dim availH As Single: availH = SLIDE_H - bodyTop - BODY_PAD_BOTTOM - FOOTER_H
+
+    ' ---- Title (with page counter when multi-slide) ----
+    Dim ttl As String: ttl = s.title
+    If pageCount > 1 Then ttl = ttl & "   (" & pageNo & "/" & pageCount & ")"
+    AddText sld, 0, 0, SLIDE_W, TITLE_H, ttl, 18, True, RGBlong(255, 255, 255), ppAlignLeft, LOE_GUTTER + 6
+
+    ' ---- Gridlines + floating-style date axis ----
     DrawGrid sld, bodyTop, availH, minDate, totalMonths, monthW, plotLeft
     DrawAxis sld, TITLE_H, minDate, totalMonths, monthW, plotLeft
 
-    ' ---- Lay out rows, tracking LOE band extents for the vertical gutter text.
+    ' ---- Rows, tracking LOE band extents for the vertical gutter title ----
     Dim y As Single: y = bodyTop
     Dim bandLoe As String: bandLoe = ""
     Dim bandY0 As Single: bandY0 = y
-    For i = 1 To n
-        ' LOE band boundary -> emit the vertical title for the band just ended.
-        If seqLoe(i) <> bandLoe Then
+    Dim i As Long, item As Variant, loeId As String
+    For i = 1 To page.Count
+        item = page(i)
+        loeId = item(3)
+        If loeId <> bandLoe Then
             If bandLoe <> "" Then DrawLoeGutter sld, bandLoe, bandY0, y
-            bandLoe = seqLoe(i): bandY0 = y
+            bandLoe = loeId: bandY0 = y
         End If
 
-        If seqType(i) = "theme" Then
-            DrawThemeHeader sld, seqId(i), plotLeft - LABEL_WIDTH, y, LABEL_WIDTH + (monthW * totalMonths), thH
-            y = y + thH
+        If item(0) = "theme" Then
+            DrawThemeHeader sld, CStr(item(1)), plotLeft - LABEL_WIDTH, y, _
+                            LABEL_WIDTH + (monthW * totalMonths), THEME_H, CBool(item(4))
+            y = y + THEME_H
         Else
-            DrawActivityRow sld, seqIdx(i), y, rowH, barH, minDate, maxDate, monthW, plotLeft, _
-                            LOE_GUTTER, LABEL_WIDTH, showMstLabels
-            y = y + rowH
+            DrawActivityRow sld, CLng(item(2)), y, s.showMstLabels, minDate, maxDate, monthW, plotLeft
+            y = y + ActRowHeight(CLng(item(2)), s.showMstLabels)
         End If
     Next i
     If bandLoe <> "" Then DrawLoeGutter sld, bandLoe, bandY0, y
+
+    ' ---- Footer page number ----
+    If pageCount > 1 Then
+        AddText sld, SLIDE_W - 200, SLIDE_H - FOOTER_H, 190, 12, _
+                "Roadmap " & pageNo & " of " & pageCount, 8, False, RGBlong(150, 170, 205), ppAlignRight, 0
+    End If
 End Sub
+
+' =====================================================================
+'  DETAILS APPENDIX
+'  Native PowerPoint tables listing every milestone for the filtered
+'  activities, with their benefit and risk detail. A static, always-visible
+'  alternative to the hover ScreenTips. Paginated across slides.
+' =====================================================================
+Private Function DrawAppendixSlides(pres As Object, seq As Collection, s As TSettings) As Long
+    Dim rows As Collection: Set rows = BuildAppendixRows(seq)
+    If rows.Count = 0 Then DrawAppendixSlides = 0: Exit Function
+
+    Dim total As Long: total = Int((rows.Count + APPENDIX_ROWS - 1) / APPENDIX_ROWS)
+    Dim headers As Variant
+    headers = Array("Activity", "Milestone", "Date", "Confidence", "Owner", "Benefit", "Risk (RAG)")
+    ' Relative column widths (sum scaled to the usable slide width).
+    Dim wts As Variant: wts = Array(2.4, 2.6, 1.1, 1.4, 1.4, 3.0, 2.6)
+
+    Dim made As Long: made = 0
+    Dim startIdx As Long: startIdx = 1
+    Do While startIdx <= rows.Count
+        Dim nRows As Long: nRows = rows.Count - startIdx + 1
+        If nRows > APPENDIX_ROWS Then nRows = APPENDIX_ROWS
+        made = made + 1
+
+        Dim sld As Object: Set sld = pres.Slides.Add(pres.Slides.Count + 1, ppLayoutBlank)
+        StyleSlideBg sld
+
+        Dim ttl As String: ttl = s.title & " - Milestone Detail"
+        If total > 1 Then ttl = ttl & "   (" & made & "/" & total & ")"
+        AddText sld, 0, 0, SLIDE_W, TITLE_H, ttl, 18, True, RGBlong(255, 255, 255), ppAlignLeft, LOE_GUTTER + 6
+
+        DrawAppendixTable sld, rows, startIdx, nRows, headers, wts
+
+        startIdx = startIdx + nRows
+    Loop
+    DrawAppendixSlides = made
+End Function
+
+Private Sub DrawAppendixTable(sld As Object, rows As Collection, startIdx As Long, nRows As Long, _
+                              headers As Variant, wts As Variant)
+    Dim cols As Long: cols = UBound(headers) - LBound(headers) + 1
+    Dim left As Single: left = 18
+    Dim top As Single: top = TITLE_H + 8
+    Dim width As Single: width = SLIDE_W - 36
+    Dim height As Single: height = SLIDE_H - top - 16
+
+    Dim shp As Object: Set shp = sld.Shapes.AddTable(nRows + 1, cols, left, top, width, height)
+    Dim tbl As Object: Set tbl = shp.Table
+
+    ' Column widths from the relative weights.
+    Dim sumW As Double, c As Long
+    For c = 0 To cols - 1: sumW = sumW + wts(c): Next c
+    For c = 1 To cols
+        tbl.Columns(c).width = width * (wts(c - 1) / sumW)
+    Next c
+
+    ' Header row.
+    For c = 1 To cols
+        StyleCell tbl.Cell(1, c), CStr(headers(c - 1)), RGBlong(13, 41, 92), RGBlong(89, 172, 218), True, 10
+    Next c
+
+    ' Data rows. row(): 0 Activity,1 Milestone,2 Date,3 Confidence,4 Owner,
+    '                   5 Benefit,6 Risk,7 confColour,8 ragColour
+    Dim r As Long
+    For r = 1 To nRows
+        Dim rowData As Variant: rowData = rows(startIdx + r - 1)
+        Dim bg As Long: bg = IIf(r Mod 2 = 0, RGBlong(11, 33, 74), RGBlong(8, 24, 58))
+        StyleCell tbl.Cell(r + 1, 1), CStr(rowData(0)), bg, RGBlong(235, 240, 250), False, 9
+        StyleCell tbl.Cell(r + 1, 2), CStr(rowData(1)), bg, RGBlong(255, 255, 255), False, 9
+        StyleCell tbl.Cell(r + 1, 3), CStr(rowData(2)), bg, RGBlong(235, 240, 250), False, 9
+        StyleCell tbl.Cell(r + 1, 4), CStr(rowData(3)), bg, CLng(rowData(7)), False, 9
+        StyleCell tbl.Cell(r + 1, 5), CStr(rowData(4)), bg, RGBlong(235, 240, 250), False, 9
+        StyleCell tbl.Cell(r + 1, 6), CStr(rowData(5)), bg, RGBlong(235, 240, 250), False, 9
+        StyleCell tbl.Cell(r + 1, 7), CStr(rowData(6)), bg, CLng(rowData(8)), False, 9
+    Next r
+End Sub
+
+' Format a single table cell (fill, text, colour, weight, size).
+Private Sub StyleCell(cell As Object, text As String, fill As Long, fontColour As Long, _
+                      bold As Boolean, size As Single)
+    cell.Shape.Fill.ForeColor.RGB = fill
+    With cell.Shape.TextFrame
+        .TextRange.text = text
+        .TextRange.Font.Size = size
+        .TextRange.Font.Bold = IIf(bold, msoTrue, msoFalse)
+        .TextRange.Font.Color.RGB = fontColour
+        .MarginLeft = 4: .MarginRight = 4: .MarginTop = 1: .MarginBottom = 1
+        .VerticalAnchor = msoAnchorMiddle
+    End With
+End Sub
+
+' One row per milestone for the filtered activities, in roadmap order.
+' Each row = Array(activity, milestone, date, confidence, owner, benefit,
+'                  risk, confColour, ragColour).
+Private Function BuildAppendixRows(seq As Collection) As Collection
+    Dim out As Collection: Set out = New Collection
+    Dim i As Long, item As Variant
+    For i = 1 To seq.Count
+        item = seq(i)
+        If item(0) = "act" Then
+            Dim a As TActivity: a = mActs(CLng(item(2)))
+            If mMstByActivity.Exists(a.uid) Then
+                Dim coll As Collection: Set coll = mMstByActivity(a.uid)
+                Dim k As Long
+                For k = 1 To coll.Count
+                    Dim m As TMilestone: m = mMsts(coll(k))
+                    Dim dt As String: dt = IIf(m.hasDate, Format$(m.mDate, "d mmm yyyy"), "")
+                    Dim confC As Long: confC = ColourFor("Milestones", "Delivery Confidence", m.confidence)
+                    Dim ragC As Long: ragC = IIf(m.hasRisk, ColourFor("Risks", "RAG", m.riskRag), RGBlong(235, 240, 250))
+                    out.Add Array(a.title, m.title, dt, m.confidence, m.owner, _
+                                  m.benefitTip, m.riskTip, confC, ragC)
+                Next k
+            End If
+        End If
+    Next i
+    Set BuildAppendixRows = out
+End Function
 
 Private Sub DrawAxis(sld As Object, top As Single, minDate As Date, totalMonths As Long, _
                      monthW As Single, plotLeft As Single)
@@ -308,9 +566,10 @@ Private Sub DrawLoeGutter(sld As Object, loeId As String, y0 As Single, y1 As Si
 End Sub
 
 Private Sub DrawThemeHeader(sld As Object, themeId As String, left As Single, top As Single, _
-                            width As Single, height As Single)
+                            width As Single, height As Single, cont As Boolean)
     Dim ttl As String
     ttl = IIf(mThemeTitle.Exists(themeId), mThemeTitle(themeId), themeId)
+    If cont Then ttl = ttl & " (cont.)"
     Dim sh As Object
     Set sh = sld.Shapes.AddShape(msoShapeRectangle, left, top, width, height)
     sh.Fill.ForeColor.RGB = RGBlong(13, 41, 92)
@@ -326,49 +585,60 @@ Private Sub DrawThemeHeader(sld As Object, themeId As String, left As Single, to
     End With
 End Sub
 
-Private Sub DrawActivityRow(sld As Object, idx As Long, top As Single, rowH As Single, barH As Single, _
-                            minDate As Date, maxDate As Date, monthW As Single, plotLeft As Single, _
-                            loeGutter As Single, labelWidth As Single, showMstLabels As Boolean)
+Private Sub DrawActivityRow(sld As Object, idx As Long, top As Single, showMstLabels As Boolean, _
+                            minDate As Date, maxDate As Date, monthW As Single, plotLeft As Single)
     Dim a As TActivity: a = mActs(idx)
-    Dim cy As Single: cy = top + rowH / 2
+    ' Bar sits in the upper BAR_ZONE; milestone labels (if any) drop into the
+    ' LABEL_ZONE reserved below it -- so labels never hide under the next row.
+    Dim cy As Single: cy = top + BAR_ZONE / 2
 
     ' ---- Label (indented by depth), left of the plot area ----
     Dim indent As Single: indent = (a.depth - 1) * 10
-    AddText sld, loeGutter + 4 + indent, top, labelWidth - 6 - indent, rowH, a.title, _
-            IIf(rowH < 16, 8, 9.5), (a.depth = 1), RGBlong(255, 255, 255), ppAlignLeft, 0
+    AddText sld, LOE_GUTTER + 4 + indent, top, LABEL_WIDTH - 6 - indent, BAR_ZONE, a.title, _
+            IIf(a.depth = 1, 9.5, 8.5), (a.depth = 1), RGBlong(255, 255, 255), ppAlignLeft, 0
 
     ' ---- Activity bar, clamped to the visible window, coloured by Resourcing ----
     If a.hasStart And a.hasEnd Then
-        Dim s As Date, e As Date
-        s = ClampDate(a.sDate, minDate, maxDate)
-        e = ClampDate(a.eDate, minDate, maxDate)
         Dim x1 As Single, x2 As Single
-        x1 = XForDate(s, minDate, monthW, plotLeft)
-        x2 = XForDate(e, minDate, monthW, plotLeft)
+        x1 = XForDate(ClampDate(a.sDate, minDate, maxDate), minDate, monthW, plotLeft)
+        x2 = XForDate(ClampDate(a.eDate, minDate, maxDate), minDate, monthW, plotLeft)
         If x2 < x1 + 2 Then x2 = x1 + 2
         Dim bar As Object
-        Set bar = sld.Shapes.AddShape(msoShapeRoundedRectangle, x1, cy - barH / 2, x2 - x1, barH)
+        Set bar = sld.Shapes.AddShape(msoShapeRoundedRectangle, x1, cy - BAR_H / 2, x2 - x1, BAR_H)
         bar.Fill.ForeColor.RGB = ColourFor("Activities", "Resourcing", a.resourcing)
         bar.Line.Visible = msoFalse
+        SetTip bar, sld, ActivityTip(a)
     End If
 
-    ' ---- Milestones: diamond, or star if it carries a Benefit; warning
-    '      triangle adjacent if it carries a Risk. ----
+    ' ---- Milestones: collect dated ones, sort left->right (so we can size
+    '      labels by the gap to the nearest neighbour), then draw. ----
     If Not mMstByActivity.Exists(a.uid) Then Exit Sub
     Dim coll As Collection: Set coll = mMstByActivity(a.uid)
+    Dim cnt As Long: cnt = 0
+    Dim cxs() As Single, mis() As Long
+    ReDim cxs(1 To coll.Count): ReDim mis(1 To coll.Count)
     Dim k As Long
     For k = 1 To coll.Count
-        Dim m As TMilestone: m = mMsts(coll(k))
-        If Not m.hasDate Then GoTo NextM
-        Dim cd As Date: cd = ClampDate(m.mDate, minDate, maxDate)
-        Dim cx As Single: cx = XForDate(cd, minDate, monthW, plotLeft)
+        If mMsts(coll(k)).hasDate Then
+            cnt = cnt + 1
+            cxs(cnt) = XForDate(ClampDate(mMsts(coll(k)).mDate, minDate, maxDate), minDate, monthW, plotLeft)
+            mis(cnt) = coll(k)
+        End If
+    Next k
+    If cnt = 0 Then Exit Sub
+    SortByX cxs, mis, cnt
+
+    Dim labelTop As Single: labelTop = top + BAR_ZONE + 1
+    Dim j As Long
+    For j = 1 To cnt
+        Dim m As TMilestone: m = mMsts(mis(j))
+        Dim cx As Single: cx = cxs(j)
         Dim mc As Long: mc = ColourFor("Milestones", "Delivery Confidence", m.confidence)
         Dim sz As Single: sz = MARKER
-        If barH < 9 Then sz = MARKER * 0.85
 
         Dim mk As Object
         If m.hasBenefit Then
-            ' 5-point star sized a touch larger than the diamond.
+            ' 5-point star (Benefit) sized a touch larger than the diamond.
             Set mk = sld.Shapes.AddShape(msoShape5pointStar, cx - sz * 1.3, cy - sz * 1.3, sz * 2.6, sz * 2.6)
         Else
             Set mk = sld.Shapes.AddShape(msoShapeDiamond, cx - sz, cy - sz, sz * 2, sz * 2)
@@ -376,26 +646,89 @@ Private Sub DrawActivityRow(sld As Object, idx As Long, top As Single, rowH As S
         mk.Fill.ForeColor.RGB = mc
         mk.Line.ForeColor.RGB = RGBlong(7, 29, 73)
         mk.Line.Weight = 0.75
+        SetTip mk, sld, MilestoneTip(m)
 
         If m.hasRisk Then
             ' Small warning triangle ~45deg down-and-right of the marker.
             Dim rr As Single: rr = sz * 0.9
-            Dim rx As Single: rx = cx + sz * 0.9
-            Dim ry As Single: ry = cy + sz * 0.5
             Dim tri As Object
-            Set tri = sld.Shapes.AddShape(msoShapeIsoscelesTriangle, rx - rr, ry - rr, rr * 2, rr * 2)
+            Set tri = sld.Shapes.AddShape(msoShapeIsoscelesTriangle, _
+                      cx + sz * 0.9 - rr, cy + sz * 0.5 - rr, rr * 2, rr * 2)
             tri.Fill.ForeColor.RGB = ColourFor("Risks", "RAG", m.riskRag)
             tri.Line.ForeColor.RGB = RGBlong(255, 255, 255)
             tri.Line.Weight = 0.5
+            SetTip tri, sld, MilestoneTip(m)
         End If
 
         If showMstLabels Then
-            AddText sld, cx - 40, cy + sz + 1, 80, 12, m.title, 7, False, _
+            ' Width bounded by the gap to the nearest neighbour to limit overlap.
+            Dim leftGap As Single, rightGap As Single, neighbour As Single
+            leftGap = IIf(j > 1, cx - cxs(j - 1), 9999)
+            rightGap = IIf(j < cnt, cxs(j + 1) - cx, 9999)
+            neighbour = IIf(leftGap < rightGap, leftGap, rightGap)
+            Dim lw As Single: lw = 90
+            If neighbour - 4 < lw Then lw = neighbour - 4
+            If lw < 36 Then lw = 36
+            AddText sld, cx - lw / 2, labelTop, lw, LABEL_ZONE - 2, m.title, 7, False, _
                     RGBlong(220, 230, 245), ppAlignCenter, 0
         End If
-NextM:
-    Next k
+    Next j
 End Sub
+
+' Insertion-sort two parallel arrays (positions + milestone indices) by x.
+Private Sub SortByX(ByRef cxs() As Single, ByRef mis() As Long, n As Long)
+    Dim i As Long, j As Long, kx As Single, km As Long
+    For i = 2 To n
+        kx = cxs(i): km = mis(i): j = i - 1
+        Do While j >= 1
+            If cxs(j) <= kx Then Exit Do
+            cxs(j + 1) = cxs(j): mis(j + 1) = mis(j): j = j - 1
+        Loop
+        cxs(j + 1) = kx: mis(j + 1) = km
+    Next i
+End Sub
+
+' ---- Hover detail (ScreenTip via a self-referencing hyperlink) ----
+' ScreenTips show on hover in Slide Show view. We also set AlternativeText as a
+' reliable fallback (visible via right-click > Edit Alt Text and to readers).
+Private Sub SetTip(shp As Object, sld As Object, text As String)
+    If Trim$(text) = "" Then Exit Sub
+    Dim t As String: t = text
+    If Len(t) > 255 Then t = Left$(t, 252) & "..."   ' ScreenTip length cap
+    On Error Resume Next
+    shp.AlternativeText = t
+    With shp.ActionSettings(ppMouseClick)
+        .Action = ppActionHyperlink
+        ' Link to this slide itself, so a click is a harmless no-op.
+        .Hyperlink.SubAddress = CStr(sld.SlideID) & "," & CStr(sld.SlideIndex) & ", "
+        .Hyperlink.ScreenTip = t
+    End With
+    On Error GoTo 0
+End Sub
+
+Private Function ActivityTip(a As TActivity) As String
+    Dim t As String: t = a.title
+    If a.hasStart Or a.hasEnd Then _
+        t = t & vbCrLf & FmtDate(a.sDate, a.hasStart) & " - " & FmtDate(a.eDate, a.hasEnd)
+    If a.resourcing <> "" Then t = t & vbCrLf & "Resourcing: " & a.resourcing
+    If a.descr <> "" Then t = t & vbCrLf & a.descr
+    ActivityTip = t
+End Function
+
+Private Function MilestoneTip(m As TMilestone) As String
+    Dim t As String: t = m.title
+    If m.hasDate Then t = t & " (" & Format$(m.mDate, "d mmm yyyy") & ")"
+    If m.confidence <> "" Then t = t & vbCrLf & "Confidence: " & m.confidence
+    If m.owner <> "" Then t = t & vbCrLf & "Owner: " & m.owner
+    If m.descr <> "" Then t = t & vbCrLf & m.descr
+    If m.hasBenefit Then t = t & vbCrLf & "Benefit: " & m.benefitTip
+    If m.hasRisk Then t = t & vbCrLf & "Risk: " & m.riskTip
+    MilestoneTip = t
+End Function
+
+Private Function FmtDate(d As Date, has As Boolean) As String
+    If has Then FmtDate = Format$(d, "d mmm yyyy") Else FmtDate = "?"
+End Function
 
 ' =====================================================================
 '  MODEL BUILDING  (mirrors assembleModel / buildHierarchy in roadmap.html)
@@ -452,11 +785,13 @@ Private Sub BuildModel()
     Dim byActId As Object: Set byActId = NewDict   ' actId -> uid (for hierarchy depth)
     Set lo = FindTable("Activities")
     If Not lo Is Nothing Then
-        Dim cTh As Long, cAct As Long, cUid As Long, cAt As Long, cS As Long, cE As Long, cRes As Long
+        Dim cTh As Long, cAct As Long, cUid As Long, cAt As Long, cAd As Long
+        Dim cS As Long, cE As Long, cRes As Long
         cTh = ColIdx(lo, Array("theme id"))
         cAct = ColIdx(lo, Array("activity id"))
         cUid = ColIdx(lo, Array("uniqueact id", "unique act id", "uniqueactid"))
         cAt = ColIdx(lo, Array("title", "name"))
+        cAd = ColIdx(lo, Array("description"))
         cS = ColIdx(lo, Array("start date", "start"))
         cE = ColIdx(lo, Array("end date", "end"))
         cRes = ColIdx(lo, Array("resourcing"))
@@ -472,6 +807,7 @@ Private Sub BuildModel()
                     .actId = CellStr(lo, r, cAct)
                     .themeId = thId
                     .title = CellStr(lo, r, cAt): If .title = "" Then .title = uid
+                    .descr = CellStr(lo, r, cAd)
                     .resourcing = CellStr(lo, r, cRes)
                     GetCellDate lo, r, cS, .hasStart, .sDate
                     GetCellDate lo, r, cE, .hasEnd, .eDate
@@ -484,17 +820,19 @@ Private Sub BuildModel()
         Next r
     End If
 
-    ' ---- Milestones (+ benefit/risk flags) ----
-    Dim benByMst As Object: Set benByMst = BuildBenefitSet()
-    Dim riskByMst As Object: Set riskByMst = BuildRiskMap()
+    ' ---- Milestones (+ benefit/risk detail for colours and hover tips) ----
+    Dim benByMst As Object: Set benByMst = BuildBenefitMap()   ' uid -> tip string
+    Dim riskByMst As Object: Set riskByMst = BuildRiskMap()    ' uid -> Array(rag, tip)
 
     mMstCount = 0: ReDim mMsts(1 To 1)
     Set lo = FindTable("Milestones")
     If Not lo Is Nothing Then
-        Dim cMa As Long, cMu As Long, cMt As Long, cMd As Long, cMc As Long
+        Dim cMa As Long, cMu As Long, cMt As Long, cMde As Long, cMo As Long, cMd As Long, cMc As Long
         cMa = ColIdx(lo, Array("activity id"))
         cMu = ColIdx(lo, Array("uniquemst id", "unique mst id", "uniquemstid"))
         cMt = ColIdx(lo, Array("milestone title", "title"))
+        cMde = ColIdx(lo, Array("description"))
+        cMo = ColIdx(lo, Array("owner"))
         cMd = ColIdx(lo, Array("date"))
         cMc = ColIdx(lo, Array("delivery confidence", "confidence"))
         For r = 1 To RowCount(lo)
@@ -507,11 +845,17 @@ Private Sub BuildModel()
                 With mMsts(mMstCount)
                     .activityUid = aUid
                     .title = CellStr(lo, r, cMt): If .title = "" Then .title = mUid
+                    .descr = CellStr(lo, r, cMde)
+                    .owner = CellStr(lo, r, cMo)
                     .confidence = CellStr(lo, r, cMc)
                     GetCellDate lo, r, cMd, .hasDate, .mDate
                     .hasBenefit = benByMst.Exists(LCase$(mUid))
+                    If .hasBenefit Then .benefitTip = benByMst(LCase$(mUid))
                     .hasRisk = riskByMst.Exists(LCase$(mUid))
-                    If .hasRisk Then .riskRag = riskByMst(LCase$(mUid))
+                    If .hasRisk Then
+                        Dim rk As Variant: rk = riskByMst(LCase$(mUid))
+                        .riskRag = rk(0): .riskTip = rk(1)
+                    End If
                 End With
                 If Not mMstByActivity.Exists(aUid) Then mMstByActivity.Add aUid, New Collection
                 mMstByActivity(aUid).Add mMstCount
@@ -520,30 +864,37 @@ Private Sub BuildModel()
     End If
 End Sub
 
-' Set of milestone UIDs (lower-cased) that have at least one real benefit.
-Private Function BuildBenefitSet() As Object
+' Map milestone UID (lower-cased) -> a benefit summary string (first benefit).
+Private Function BuildBenefitMap() As Object
     Dim d As Object: Set d = NewDict
     Dim lo As Object: Set lo = FindTable("Benefits")
-    If lo Is Nothing Then Set BuildBenefitSet = d: Exit Function
+    If lo Is Nothing Then Set BuildBenefitMap = d: Exit Function
     Dim cM As Long, cT As Long, cC As Long, cB As Long, cI As Long
     cM = ColIdx(lo, Array("milestone id"))
     cT = ColIdx(lo, Array("benefit title", "title"))
     cC = ColIdx(lo, Array("category"))
     cB = ColIdx(lo, Array("beneficiary"))
     cI = ColIdx(lo, Array("impact"))
-    Dim r As Long, mid As String
+    Dim r As Long, mid As String, t As String, cat As String, ben As String, imp As String
     For r = 1 To RowCount(lo)
         mid = CellStr(lo, r, cM)
+        t = CellStr(lo, r, cT): cat = CellStr(lo, r, cC)
+        ben = CellStr(lo, r, cB): imp = CellStr(lo, r, cI)
         ' Drop trailing blank rows whose only value is the auto-filled key.
-        If mid <> "" And (CellStr(lo, r, cT) <> "" Or CellStr(lo, r, cC) <> "" _
-            Or CellStr(lo, r, cB) <> "" Or CellStr(lo, r, cI) <> "") Then
-            If Not d.Exists(LCase$(mid)) Then d.Add LCase$(mid), True
+        If mid <> "" And (t <> "" Or cat <> "" Or ben <> "" Or imp <> "") Then
+            If Not d.Exists(LCase$(mid)) Then
+                Dim tip As String: tip = t
+                If cat <> "" Then tip = tip & " [" & cat & "]"
+                If ben <> "" Then tip = tip & " - " & ben
+                If imp <> "" Then tip = tip & " - " & imp
+                d.Add LCase$(mid), tip
+            End If
         End If
     Next r
-    Set BuildBenefitSet = d
+    Set BuildBenefitMap = d
 End Function
 
-' Map milestone UID (lower-cased) -> first Risk's RAG value.
+' Map milestone UID (lower-cased) -> Array(RAG value, risk summary string).
 Private Function BuildRiskMap() As Object
     Dim d As Object: Set d = NewDict
     Dim lo As Object: Set lo = FindTable("Risks")
@@ -553,11 +904,17 @@ Private Function BuildRiskMap() As Object
     cT = ColIdx(lo, Array("risk title", "title"))
     cO = ColIdx(lo, Array("risk owner", "owner"))
     cR = ColIdx(lo, Array("rag"))
-    Dim r As Long, mid As String
+    Dim r As Long, mid As String, t As String, owner As String, rag As String
     For r = 1 To RowCount(lo)
         mid = CellStr(lo, r, cM)
-        If mid <> "" And (CellStr(lo, r, cT) <> "" Or CellStr(lo, r, cO) <> "" Or CellStr(lo, r, cR) <> "") Then
-            If Not d.Exists(LCase$(mid)) Then d.Add LCase$(mid), CellStr(lo, r, cR)
+        t = CellStr(lo, r, cT): owner = CellStr(lo, r, cO): rag = CellStr(lo, r, cR)
+        If mid <> "" And (t <> "" Or owner <> "" Or rag <> "") Then
+            If Not d.Exists(LCase$(mid)) Then
+                Dim tip As String: tip = t
+                If rag <> "" Then tip = tip & " [" & rag & "]"
+                If owner <> "" Then tip = tip & " - owner: " & owner
+                d.Add LCase$(mid), Array(rag, tip)
+            End If
         End If
     Next r
     Set BuildRiskMap = d
@@ -602,7 +959,8 @@ Private Sub ParseLookupsSheet()
                 If Not valDict.Exists(LCase$(valTxt)) Then valDict.Add LCase$(valTxt), clr
                 idx = idx + 1
             Next r
-            mLookupColour(tbl & "|" & col) = valDict
+            ' Dictionary item holding an object must be assigned with Set.
+            Set mLookupColour(tbl & "|" & col) = valDict
         End If
     Next c
 End Sub
@@ -661,45 +1019,53 @@ End Function
 ' =====================================================================
 '  SETTINGS
 ' =====================================================================
-Private Sub ReadSettings(ByRef title As String, ByRef dStart As Date, ByRef dEnd As Date, _
-                         ByRef maxLevel As Long, ByRef showMstLabels As Boolean)
-    ' Defaults: current month -> +12 months; Level 1 only; labels off.
+Private Function ReadSettings() As TSettings
+    Dim s As TSettings
+    ' Defaults: current month -> +12 months; Level 1 only; labels off; no filters.
     Dim now As Date: now = Date
-    dStart = DateSerial(Year(now), Month(now), 1)
-    dEnd = DateSerial(Year(now), Month(now) + 12, 1)
-    title = "Programme Roadmap"
-    maxLevel = 1
-    showMstLabels = False
+    s.dStart = DateSerial(Year(now), Month(now), 1)
+    s.dEnd = DateSerial(Year(now), Month(now) + 12, 1)
+    s.title = "Programme Roadmap"
+    s.maxLevel = 1
+    s.showMstLabels = False
+    s.loeFilter = "": s.themeFilter = ""
+    s.onlyBenefit = False: s.onlyRisk = False
+    s.detailsAppendix = False
 
     Dim ws As Object
     Set ws = FindSheet(Array("roadmap settings", "settings"))
-    If ws Is Nothing Then GoTo ClampToData
+    If Not ws Is Nothing Then
+        ' Labels in column A, values in column B.
+        Dim r As Long, lbl As String, val As Variant
+        For r = 1 To 50
+            lbl = LCase$(Trim$(CStr(GetSheetVal(ws, r, 1))))
+            val = GetSheetVal(ws, r, 2)
+            Select Case lbl
+                Case "title": If Trim$(CStr(val)) <> "" Then s.title = CStr(val)
+                Case "start date": If IsDate(val) Then s.dStart = CDate(val)
+                Case "end date": If IsDate(val) Then s.dEnd = CDate(val)
+                Case "max level": If IsNumeric(val) Then s.maxLevel = CLng(val)
+                Case "show milestone labels": s.showMstLabels = AsBool(val)
+                Case "loes", "loe", "loe filter": s.loeFilter = Trim$(CStr(val))
+                Case "themes", "theme", "theme filter": s.themeFilter = Trim$(CStr(val))
+                Case "only with benefit", "only benefit": s.onlyBenefit = AsBool(val)
+                Case "only with risk", "only risk": s.onlyRisk = AsBool(val)
+                Case "details appendix", "appendix": s.detailsAppendix = AsBool(val)
+            End Select
+        Next r
+    End If
 
-    ' Labels in column A, values in column B.
-    Dim r As Long, lbl As String, val As Variant
-    For r = 1 To 50
-        lbl = LCase$(Trim$(CStr(GetSheetVal(ws, r, 1))))
-        val = GetSheetVal(ws, r, 2)
-        Select Case lbl
-            Case "title": If Trim$(CStr(val)) <> "" Then title = CStr(val)
-            Case "start date": If IsDate(val) Then dStart = CDate(val)
-            Case "end date": If IsDate(val) Then dEnd = CDate(val)
-            Case "max level": If IsNumeric(val) Then maxLevel = CLng(val)
-            Case "show milestone labels": showMstLabels = AsBool(val)
-        End Select
-    Next r
-
-ClampToData:
-    If maxLevel < 1 Then maxLevel = 1
+    If s.maxLevel < 1 Then s.maxLevel = 1
     ' Clamp the window to the data extent (mirrors clampMonth).
     Dim mn As Date, mx As Date, has As Boolean
     DataDateExtent mn, mx, has
     If has Then
-        If dStart < FirstOfMonth(mn) Then dStart = FirstOfMonth(mn)
-        If dEnd > FirstOfMonth(mx) Then dEnd = FirstOfMonth(mx)
-        If dEnd < dStart Then dEnd = dStart
+        If s.dStart < FirstOfMonth(mn) Then s.dStart = FirstOfMonth(mn)
+        If s.dEnd > FirstOfMonth(mx) Then s.dEnd = FirstOfMonth(mx)
+        If s.dEnd < s.dStart Then s.dEnd = s.dStart
     End If
-End Sub
+    ReadSettings = s
+End Function
 
 Private Sub DataDateExtent(ByRef mn As Date, ByRef mx As Date, ByRef has As Boolean)
     has = False
@@ -864,16 +1230,7 @@ Private Function SplitSemis(spec As String, ByRef out() As String) As Long
 End Function
 
 Private Function AsBool(v As Variant) As Boolean
+    ' CStr(True) = "True", so an actual Boolean TRUE cell is caught here too.
     Dim s As String: s = LCase$(Trim$(CStr(v)))
-    AsBool = (s = "true" Or s = "yes" Or s = "y" Or s = "1" Or v = True)
+    AsBool = (s = "true" Or s = "yes" Or s = "y" Or s = "1")
 End Function
-
-' Grow the parallel sequence arrays to at least size n.
-Private Sub GrowSeq(ByRef t() As String, ByRef id() As String, ByRef ix() As Long, ByRef lo() As String, n As Long)
-    If n > UBound(t) Then
-        ReDim Preserve t(1 To n + 16)
-        ReDim Preserve id(1 To n + 16)
-        ReDim Preserve ix(1 To n + 16)
-        ReDim Preserve lo(1 To n + 16)
-    End If
-End Sub
