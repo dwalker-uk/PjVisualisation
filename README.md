@@ -12,6 +12,7 @@ dependency, pulled from a CDN at runtime).
 | **`roadmap.html`** | The main tool: an interactive programme **roadmap** (LOE → Theme → Activity timeline with milestones, benefits and risks). This is the file you almost certainly want. |
 | `index.html` | An earlier/alternative roadmap visualiser. Kept for reference. |
 | `sp-test.html` | Throwaway harness proving a SharePoint-hosted `.xlsx` can be fetched and parsed in the browser. Safe to delete. |
+| `powerpoint/` | **VBA proof-of-concept**: an Excel macro that generates a static PowerPoint roadmap slide from the same data — an enterprise-friendly, in-M365 alternative to the web tool. See `powerpoint/README.md`. |
 | `test/` | Node unit tests for the roadmap's pure data layer, plus a script to (re)generate the sample workbook. |
 
 To use a tool, just open the `.html` file in a browser and choose an Excel file.
