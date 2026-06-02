@@ -103,6 +103,8 @@ Private Type TSettings
     onlyBenefit As Boolean    ' hide activities with no benefit milestone
     onlyRisk As Boolean       ' hide activities with no risk milestone
     detailsAppendix As Boolean ' append milestone/benefit/risk detail table slides
+    tipLink As String         ' hover-tip hyperlink target ("" = source workbook,
+                              ' "none" = internal link / tips only in this file)
 End Type
 
 Private Type TMilestone
@@ -130,6 +132,8 @@ Private mActsByTheme As Object    ' themeId -> Collection of index into mActs
 Private mMsts() As TMilestone
 Private mMstCount As Long
 Private mMstByActivity As Object  ' activityUid -> Collection of index into mMsts
+Private mTipLink As String        ' hyperlink target carrying hover ScreenTips
+                                  ' (external link => tips survive copy to another deck)
 
 ' =====================================================================
 '  ENTRY POINT
@@ -143,6 +147,7 @@ Public Sub GenerateRoadmap()
 
     ' --- Settings (sheet "Roadmap Settings" or sensible defaults) ---
     Dim s As TSettings: s = ReadSettings()
+    mTipLink = ResolveTipLink(s)   ' carrier for hover tooltips
 
     ' --- Shared timeline geometry (identical across every slide) ---
     Dim minDate As Date, maxDate As Date, totalMonths As Long
@@ -701,12 +706,37 @@ Private Sub SetTip(shp As Object, sld As Object, text As String)
     shp.AlternativeText = t
     With shp.ActionSettings(ppMouseClick)
         .Action = ppActionHyperlink
-        ' Link to this slide itself, so a click is a harmless no-op.
-        .Hyperlink.SubAddress = CStr(sld.SlideID) & "," & CStr(sld.SlideIndex) & ", "
+        If mTipLink <> "" Then
+            ' EXTERNAL link target. PowerPoint preserves the custom ScreenTip
+            ' (and the link) when the slide is copied into another presentation,
+            ' so the hover detail travels with the slide. Click jumps to the
+            ' target (the source workbook by default).
+            .Hyperlink.Address = mTipLink
+        Else
+            ' Fallback: internal no-op self-link. Tips work in this generated
+            ' file but are dropped if the slide is copied to another deck.
+            .Hyperlink.SubAddress = CStr(sld.SlideID) & "," & CStr(sld.SlideIndex) & ", "
+        End If
         .Hyperlink.ScreenTip = t
     End With
     On Error GoTo 0
 End Sub
+
+' Resolve the hyperlink target used to carry hover ScreenTips.
+'   "" (default) -> the source workbook's path/URL (an external link, so tips
+'                   survive copy; clicking a marker opens the data).
+'   "none"       -> no external link; fall back to an internal self-link
+'                   (tips work only inside the generated file).
+'   anything else-> used verbatim as the link target (e.g. a SharePoint URL).
+Private Function ResolveTipLink(s As TSettings) As String
+    Dim v As String: v = Trim$(s.tipLink)
+    If LCase$(v) = "none" Then ResolveTipLink = "": Exit Function
+    If v <> "" Then ResolveTipLink = v: Exit Function
+    On Error Resume Next
+    Dim fn As String: fn = ThisWorkbook.FullName   ' "" if never saved
+    On Error GoTo 0
+    ResolveTipLink = fn
+End Function
 
 Private Function ActivityTip(a As TActivity) As String
     Dim t As String: t = a.title
@@ -1033,6 +1063,7 @@ Private Function ReadSettings() As TSettings
     s.loeFilter = "": s.themeFilter = ""
     s.onlyBenefit = False: s.onlyRisk = False
     s.detailsAppendix = False
+    s.tipLink = ""
 
     Dim ws As Object
     Set ws = FindSheet(Array("roadmap settings", "settings"))
@@ -1053,6 +1084,7 @@ Private Function ReadSettings() As TSettings
                 Case "only with benefit", "only benefit": s.onlyBenefit = AsBool(val)
                 Case "only with risk", "only risk": s.onlyRisk = AsBool(val)
                 Case "details appendix", "appendix": s.detailsAppendix = AsBool(val)
+                Case "tip link", "tip url": s.tipLink = Trim$(CStr(val))
             End Select
         Next r
     End If
